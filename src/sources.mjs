@@ -69,10 +69,27 @@ export async function rpcLogs(addresses, topic0s, from, to) {
 
 export const hasHyperSync = () => Boolean(TOKEN);
 
+// HyperSync's free package allows 30 requests a minute. A month of RedStone
+// adapter logs is dozens of pages, so pages are paced to stay under that —
+// a slower backfill beats a rejected one.
+const HS_MAX_PER_MIN = Number(process.env.HYPERSYNC_MAX_RPM || 24);
+const hsStamps = [];
+async function paceHyperSync() {
+  const now = Date.now();
+  while (hsStamps.length && now - hsStamps[0] > 60000) hsStamps.shift();
+  if (hsStamps.length >= HS_MAX_PER_MIN) {
+    const wait = 60000 - (now - hsStamps[0]) + 250;
+    await new Promise((r) => setTimeout(r, wait));
+    return paceHyperSync();
+  }
+  hsStamps.push(Date.now());
+}
+
 export async function hypersyncLogs(addresses, topic0s, from, to) {
   const logs = []; const txs = new Map();
   let next = from;
-  for (let page = 0; page < 200 && next <= to; page++) {
+  for (let page = 0; page < 400 && next <= to; page++) {
+    await paceHyperSync();
     const body = {
       from_block: next, to_block: to + 1,
       logs: [{ address: addresses, ...(topic0s?.length ? { topics: [topic0s] } : {}) }],

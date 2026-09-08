@@ -39,6 +39,8 @@
     <div class="controls">
       <select id="pair"></select>
       <button data-w="24h">24h</button><button data-w="7d">7d</button><button data-w="30d" aria-pressed="true">30d</button>
+      <span style="width:8px"></span>
+      <button data-v="price" aria-pressed="true" title="what each oracle wrote">price</button><button data-v="spread" title="how far each write sits from the median of the three">vs median</button>
       <span class="status" id="status">loading…</span>
     </div>
   </header>
@@ -58,7 +60,23 @@
 const COLORS = { chainlink:'#3b82f6', chronicle:'#22c55e', redstone:'#e11d48' };
 const NAMES = { chainlink:'Chainlink', chronicle:'Chronicle', redstone:'RedStone' };
 const ORDER = ['chainlink','chronicle','redstone'];
-let pair = new URLSearchParams(location.search).get('pair') || 'ETH', win = '30d', data = null, stats = null, rule = {};
+let pair = new URLSearchParams(location.search).get('pair') || 'ETH', win = '30d', view = 'price', data = null, stats = null, rule = {};
+
+// "vs median": for every write, the median of the three oracles' latest values at that moment,
+// and the write's distance from it in basis points. Lines that sit on top of each other in
+// price terms come apart here — this is where the differences live.
+function spreadSeries(updates){
+  const merged = ORDER.flatMap(o => (updates[o]||[]).map(p => ({...p, o}))).sort((a,b)=>a.t-b.t);
+  const last = {}; const out = Object.fromEntries(ORDER.map(o=>[o,[]]));
+  for (const p of merged){
+    last[p.o] = p.v;
+    const vals = ORDER.map(o=>last[o]).filter(v=>v!=null).sort((a,b)=>a-b);
+    if (vals.length < 2) continue;
+    const med = vals.length%2 ? vals[vals.length>>1] : (vals[vals.length/2-1]+vals[vals.length/2])/2;
+    out[p.o].push({...p, price:p.v, v:(p.v-med)/med*10000});
+  }
+  return out;
+}
 const $ = (s) => document.querySelector(s);
 const fmtP = (v) => v >= 1000 ? v.toLocaleString('en-US',{maximumFractionDigits:2}) : v.toLocaleString('en-US',{maximumFractionDigits:4});
 const fmtU = (v) => v == null ? '—' : '$' + v.toFixed(2);
@@ -88,25 +106,27 @@ function draw(){
   const cv = $('#chart'), dpr = Math.min(2, devicePixelRatio||1), r = cv.getBoundingClientRect();
   cv.width = r.width*dpr; cv.height = r.height*dpr; const ctx = cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
   ctx.clearRect(0,0,r.width,r.height); $('#tip').style.display='none';
-  const all = ORDER.flatMap(o => (data.updates[o]||[]).map(p => ({...p,o})));
+  const series = view === 'spread' ? spreadSeries(data.updates) : data.updates;
+  const all = ORDER.flatMap(o => (series[o]||[]).map(p => ({...p,o})));
   $('#count').textContent = all.length ? `${all.length} updates in view` : '';
   if (!all.length){ ctx.fillStyle='#8a93a0'; ctx.fillText('no updates in this window yet', 16, 30); cv._pts=[]; return; }
   const now = Date.now()/1000, secs = {'24h':86400,'7d':604800,'30d':2592000}[win];
   const t0 = now - secs, t1 = now;
   let lo = Math.min(...all.map(p=>p.v)), hi = Math.max(...all.map(p=>p.v)); if (hi===lo){ hi+=1; lo-=1; } const pad=(hi-lo)*.08; lo-=pad; hi+=pad;
   // Axis labels: few decimals when the range is wide, and a left margin measured from the widest label.
-  const span = hi-lo; const axisFmt = (v) => v.toLocaleString('en-US',{maximumFractionDigits: span>500?0:span>20?1:span>1?2:4});
+  const span = hi-lo; const axisFmt = view === 'spread' ? (v) => (v>0?'+':'') + v.toFixed(span>20?0:1) + ' bps' : (v) => v.toLocaleString('en-US',{maximumFractionDigits: span>500?0:span>20?1:span>1?2:4});
   ctx.font='11px ui-monospace,monospace';
   const labels=[0,1,2,3,4].map(i=>axisFmt(lo+(hi-lo)*i/4));
   const L=Math.ceil(Math.max(...labels.map(t=>ctx.measureText(t).width)))+14, R=12, T=12, B=28, W=r.width-L-R, H=r.height-T-B;
   const X = t => L + (t-t0)/(t1-t0)*W, Y = v => T + (1-(v-lo)/(hi-lo))*H;
   ctx.strokeStyle='#232830'; ctx.fillStyle='#8a93a0'; ctx.font='11px ui-monospace,monospace'; ctx.textAlign='right';
   for (let i=0;i<=4;i++){ const v = lo + (hi-lo)*i/4, y = Y(v); ctx.beginPath(); ctx.moveTo(L,y); ctx.lineTo(L+W,y); ctx.stroke(); ctx.fillText(labels[i], L-8, y+4); }
+  if (view === 'spread' && lo < 0 && hi > 0){ ctx.strokeStyle='#4b5563'; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(L,Y(0)); ctx.lineTo(L+W,Y(0)); ctx.stroke(); ctx.setLineDash([]); }
   ctx.textAlign='center'; const ticks = Math.max(2, Math.min(win==='24h'?6:win==='7d'?7:6, Math.floor(W/72)));
   for (let i=0;i<=ticks;i++){ const t = t0 + (t1-t0)*i/ticks, x = X(t); const d = new Date(t*1000); ctx.fillText(win==='24h' ? d.toISOString().slice(11,16) : d.toISOString().slice(5,10).replace('-','/'), x, r.height-8); }
   const pts=[];
   for (const o of ORDER){
-    const s = (data.updates[o]||[]).filter(p=>p.t>=t0); if(!s.length) continue;
+    const s = (series[o]||[]).filter(p=>p.t>=t0); if(!s.length) continue;
     ctx.strokeStyle=COLORS[o]; ctx.lineWidth=1.5; ctx.beginPath();
     s.forEach((p,i)=>{ const x=X(p.t), y=Y(p.v); i?ctx.lineTo(x,y):ctx.moveTo(x,y); pts.push({x,y,p,o}); }); ctx.stroke();
     ctx.fillStyle=COLORS[o]; for (const q of pts.filter(q=>q.o===o)){ ctx.beginPath(); ctx.arc(q.x,q.y,2.4,0,Math.PI*2); ctx.fill(); }
@@ -117,7 +137,7 @@ $('#chart').addEventListener('mousemove', (e)=>{
   const cv=$('#chart'), pts=cv._pts||[]; if(!pts.length) return; const r=cv.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top;
   let best=null, bd=18*18; for(const q of pts){ const d=(q.x-mx)**2+(q.y-my)**2; if(d<bd){bd=d;best=q;} }
   const tip=$('#tip'); if(!best){ tip.style.display='none'; return; }
-  tip.innerHTML=`<b style="color:${COLORS[best.o]}">${NAMES[best.o]}</b> ${fmtP(best.p.v)}<br>${ts(best.p.t)}<br>gas ${fmtU(best.p.c)}${best.p.n>1?` <span style="color:#8a93a0">(1/${best.p.n} of tx)</span>`:''}${best.p.op?' <span style="color:#f59e0b">optimistic</span>':''}`;
+  tip.innerHTML=`<b style="color:${COLORS[best.o]}">${NAMES[best.o]}</b> ${view==='spread' ? `${best.p.v>0?'+':''}${best.p.v.toFixed(2)} bps <span style="color:#8a93a0">· ${fmtP(best.p.price)}</span>` : fmtP(best.p.v)}<br>${ts(best.p.t)}<br>gas ${fmtU(best.p.c)}${best.p.n>1?` <span style="color:#8a93a0">(1/${best.p.n} of tx)</span>`:''}${best.p.op?' <span style="color:#f59e0b">optimistic</span>':''}`;
   tip.style.display='block'; tip.style.top=(best.y+2)+'px';
   const panelW = cv.parentElement.clientWidth, tw = tip.offsetWidth;
   tip.style.left = (best.x + 14 + tw > panelW - 8 ? Math.max(4, best.x - tw - 14) : best.x + 14) + 'px';
@@ -125,7 +145,9 @@ $('#chart').addEventListener('mousemove', (e)=>{
 $('#chart').addEventListener('mouseleave', ()=> $('#tip').style.display='none');
 
 function renderStats(){
-  const s = stats.stats[win]; const cards = ORDER.map(o => { const x = s[o];
+  const s = stats.stats[win]; const tracked = new Set(stats.oracles || ORDER);
+  const cards = ORDER.map(o => { const x = s[o];
+    if (!tracked.has(o)) return `<div class="panel card" style="opacity:.55"><h3><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${COLORS[o]}"></i>${NAMES[o]}</h3><div class="row"><span>Not tracked for this pair<small>no ${NAMES[o]} contract verified on Ethereum for it — this says nothing about whether one exists</small></span><span>—</span></div></div>`;
     return `<div class="panel card"><h3><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${COLORS[o]}"></i>${NAMES[o]}</h3>
       <div class="row"><span>Updates (${win})</span><span>${x.updates}</span></div>
       <div class="row"><span>Max deviation<small>between consecutive updates</small></span><span>${x.maxDeviationPct.toFixed(4)}%</span></div>
@@ -135,10 +157,11 @@ function renderStats(){
       <div class="row"><span>Latest on-chain<small>${x.lastAt?ts(x.lastAt):''}</small></span><span>${x.lastValue!=null?fmtP(x.lastValue):'—'} <span style="color:#8a93a0">· ${age(x.ageSeconds)} old</span></span></div>
     </div>`; }).join('');
   $('#stats').innerHTML = cards;
-  $('#foot').innerHTML = `Every point is one on-chain write, read from the oracle contracts' own events on Ethereum — nothing sampled, nothing estimated. Gas is priced at the current Chainlink ETH/USD ($${(stats.ethUsd||0).toFixed(0)}). RedStone writes several feeds per transaction, so its gas is split evenly across the feeds in that transaction; Chainlink and Chronicle write one feed per transaction. Chronicle points marked <span style="color:#f59e0b">optimistic</span> are OpPoked writes that finalise later. Max deviation is the largest move between two consecutive updates of the same oracle. Independent, not affiliated with any oracle.`;
+  $('#foot').innerHTML = `Every point is one on-chain write, read from the oracle contracts' own events on Ethereum — nothing sampled, nothing estimated. Gas is priced at the current Chainlink ETH/USD ($${(stats.ethUsd||0).toFixed(0)}). RedStone writes several feeds per transaction, so its gas is split evenly across the feeds in that transaction; Chainlink and Chronicle write one feed per transaction. Chronicle points marked <span style="color:#f59e0b">optimistic</span> are OpPoked writes that finalise later. Max deviation is the largest move between two consecutive updates of the same oracle. In the <b>vs median</b> view each write is shown as its distance from the median of the oracles' latest values at that moment${(stats.oracles||[]).length===2?' — with two oracles that median is simply their midpoint, so the two sit at half the gap from each other; a swing is not one of them being wrong':''}. Independent, not affiliated with any oracle.`;
 }
 
 document.querySelectorAll('button[data-w]').forEach(b=>b.addEventListener('click',()=>{ win=b.dataset.w; document.querySelectorAll('button[data-w]').forEach(x=>x.setAttribute('aria-pressed',x===b)); refresh(); }));
+document.querySelectorAll('button[data-v]').forEach(b=>b.addEventListener('click',()=>{ view=b.dataset.v; document.querySelectorAll('button[data-v]').forEach(x=>x.setAttribute('aria-pressed',x===b)); if(data) draw(); }));
 $('#pair').addEventListener('change', e=>{ pair=e.target.value; refresh(); });
 addEventListener('resize', ()=> data && draw());
 loadPairs().then(refresh); setInterval(refresh, 30000);

@@ -18,7 +18,18 @@ export const PAIRS = {
     redstoneFeedId: 'BTC',
     chronicle: '0x24C392CDbF32Cf911B258981a66d5541d85269ce',
   },
+  // The pairs below are every remaining USD feed that both RedStone's Ethereum adapter
+  // and Chainlink publish. Chronicle is null where no scribe has been verified on-chain —
+  // "not tracked", not "does not exist".
+  cbBTC: { label: 'cbBTC / USD', chainlinkProxy: '0x2665701293fCbEB223D11A08D826563EDcCE423A', redstoneFeedId: 'cbBTC', chronicle: null },
+  WLFI:  { label: 'WLFI / USD',  chainlinkProxy: '0x14E5FC91Ddb3f97C33013Cc9fA74F54062Ad1Aa1', redstoneFeedId: 'WLFI',  chronicle: null },
+  PYUSD: { label: 'PYUSD / USD', chainlinkProxy: '0x8f1dF6D7F2db73eECE86a18b4381F4707b918FB1', redstoneFeedId: 'PYUSD', chronicle: null },
+  USDe:  { label: 'USDe / USD',  chainlinkProxy: '0xa569d910839Ae8865Da8F8e70FfFb0cBA869F961', redstoneFeedId: 'USDe',  chronicle: null },
+  sUSDe: { label: 'sUSDe / USD', chainlinkProxy: '0xFF3BC18cCBd5999CE63E788A1c250a88626aD099', redstoneFeedId: 'sUSDe', chronicle: null },
 };
+
+// Which oracles actually publish a given pair here.
+export const oraclesFor = (pair) => ORACLES.filter((o) => o !== 'chronicle' || Boolean(PAIRS[pair]?.chronicle));
 
 // RedStone writes every feed through one adapter; the feed id is inside the event.
 export const REDSTONE_ADAPTER = '0xd72a6BA4a87DDB33e801b3f1c7750b2d0911fC6C';

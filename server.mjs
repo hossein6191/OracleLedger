@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
-import { PAIRS, ORACLES, REDSTONE_ADAPTER, COST_RULE, CHAIN } from './src/config.mjs';
+import { PAIRS, ORACLES, REDSTONE_ADAPTER, COST_RULE, CHAIN, oraclesFor } from './src/config.mjs';
 import { TOPIC, feedIdBytes32, decodeChainlink, decodeRedstone, decodeChronicle } from './src/decode.mjs';
 import { blockNumber, aggregatorOf, ethUsd, fetchLogs, rpcLogs, receiptsFor, hasHyperSync } from './src/sources.mjs';
 import { state, addUpdates, save, load } from './src/store.mjs';
@@ -16,7 +16,7 @@ const PORT = Number(process.env.PORT || 3000);
 
 const aggregators = {};       // pair -> chainlink aggregator address
 const feedIdToPair = Object.fromEntries(Object.entries(PAIRS).map(([p, c]) => [feedIdBytes32(c.redstoneFeedId), p]));
-const chronicleToPair = Object.fromEntries(Object.entries(PAIRS).map(([p, c]) => [c.chronicle.toLowerCase(), p]));
+const chronicleToPair = Object.fromEntries(Object.entries(PAIRS).filter(([, c]) => c.chronicle).map(([p, c]) => [c.chronicle.toLowerCase(), p]));
 
 async function resolveAggregators() {
   for (const [p, c] of Object.entries(PAIRS)) aggregators[p] = await aggregatorOf(c.chainlinkProxy);
@@ -29,7 +29,7 @@ async function ingest(from, to, useArchive) {
   const [cl, rs, ch] = await Promise.all([
     get(clAddrs, [TOPIC.chainlinkAnswerUpdated], from, to),
     get([REDSTONE_ADAPTER], [TOPIC.redstoneValueUpdate], from, to),
-    get(Object.values(PAIRS).map((c) => c.chronicle), [TOPIC.chroniclePoked, TOPIC.chronicleOpPoked], from, to),
+    get(Object.values(PAIRS).map((c) => c.chronicle).filter(Boolean), [TOPIC.chroniclePoked, TOPIC.chronicleOpPoked], from, to),
   ]);
 
   // RedStone: how many feeds each transaction wrote, before filtering to ours.
@@ -64,7 +64,10 @@ async function ingest(from, to, useArchive) {
 async function backfill() {
   const latest = await blockNumber();
   const horizon = latest - Math.ceil(HISTORY_DAYS * 86400 / CHAIN.blockSeconds);
-  const from = Math.max(horizon, state.lastBlock ? state.lastBlock + 1 : 0);
+  // Resume from the snapshot — unless some tracked series is still empty (a pair
+  // added since the snapshot was taken), in which case take the whole horizon.
+  const anyEmpty = Object.entries(state.pairs).some(([p, byO]) => oraclesFor(p).some((o) => !byO[o]?.length));
+  const from = anyEmpty ? horizon : Math.max(horizon, state.lastBlock ? state.lastBlock + 1 : 0);
   state.source = hasHyperSync() ? 'hypersync' : 'rpc';
   state.backfill = { status: 'running', startedAt: Date.now(), finishedAt: 0, from, to: latest };
   console.log(`[backfill] ${state.source}: blocks ${from}..${latest} (${latest - from} blocks, ~${((latest - from) * CHAIN.blockSeconds / 86400).toFixed(1)} days)`);
@@ -94,17 +97,17 @@ createServer((req, res) => {
   const url = new URL(req.url, 'http://x');
   const pair = url.searchParams.get('pair') || 'ETH';
   if (url.pathname === '/api/health') return json(res, { ok: true, chain: CHAIN.name, source: state.source, backfill: state.backfill, lastBlock: state.lastBlock, lastPoll: state.lastPoll, ethUsd: state.ethUsd, pairs: Object.keys(PAIRS), historyDays: HISTORY_DAYS });
-  if (url.pathname === '/api/pairs') return json(res, { pairs: Object.entries(PAIRS).map(([id, c]) => ({ id, label: c.label })), oracles: ORACLES, costRule: COST_RULE });
+  if (url.pathname === '/api/pairs') return json(res, { pairs: Object.entries(PAIRS).map(([id, c]) => ({ id, label: c.label, oracles: oraclesFor(id) })), oracles: ORACLES, costRule: COST_RULE });
   if (!PAIRS[pair]) return json(res, { error: 'unknown pair' }, 404);
   if (url.pathname === '/api/updates') {
     const win = WINDOWS[url.searchParams.get('window')] || WINDOWS['30d'];
     const from = Math.floor(Date.now() / 1000) - win;
     const out = {}; for (const o of ORACLES) out[o] = state.pairs[pair][o].filter((u) => u.t >= from).map((u) => ({ t: u.t, v: u.value, c: u.costUsd, tx: u.transactionHash, b: u.blockNumber, n: u.feedsInTx, op: u.optimistic || undefined }));
-    return json(res, { pair, window: url.searchParams.get('window') || '30d', ethUsd: state.ethUsd, updates: out });
+    return json(res, { pair, oracles: oraclesFor(pair), window: url.searchParams.get('window') || '30d', ethUsd: state.ethUsd, updates: out });
   }
   if (url.pathname === '/api/stats') {
     const out = {}; for (const [w, secs] of Object.entries(WINDOWS)) { out[w] = {}; for (const o of ORACLES) out[w][o] = statsFor(state.pairs[pair][o], secs); }
-    return json(res, { pair, ethUsd: state.ethUsd, costRule: COST_RULE, stats: out });
+    return json(res, { pair, oracles: oraclesFor(pair), ethUsd: state.ethUsd, costRule: COST_RULE, stats: out });
   }
   if (url.pathname === '/' || url.pathname === '/index.html') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); return res.end(readFileSync(INDEX)); }
   res.writeHead(404); res.end('not found');
