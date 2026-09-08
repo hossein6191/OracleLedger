@@ -43,7 +43,7 @@
     </div>
   </header>
 
-  <div class="panel" style="position:relative">
+  <div class="panel" style="position:relative;overflow:hidden">
     <div class="legend"><span><i style="background:var(--cl)"></i>Chainlink</span><span><i style="background:var(--ch)"></i>Chronicle</span><span><i style="background:var(--rs)"></i>RedStone</span><span id="count"></span></div>
     <canvas id="chart"></canvas>
     <div class="tip" id="tip"></div>
@@ -87,18 +87,22 @@ async function refresh(){
 function draw(){
   const cv = $('#chart'), dpr = Math.min(2, devicePixelRatio||1), r = cv.getBoundingClientRect();
   cv.width = r.width*dpr; cv.height = r.height*dpr; const ctx = cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
-  ctx.clearRect(0,0,r.width,r.height);
+  ctx.clearRect(0,0,r.width,r.height); $('#tip').style.display='none';
   const all = ORDER.flatMap(o => (data.updates[o]||[]).map(p => ({...p,o})));
   $('#count').textContent = all.length ? `${all.length} updates in view` : '';
   if (!all.length){ ctx.fillStyle='#8a93a0'; ctx.fillText('no updates in this window yet', 16, 30); cv._pts=[]; return; }
   const now = Date.now()/1000, secs = {'24h':86400,'7d':604800,'30d':2592000}[win];
   const t0 = now - secs, t1 = now;
   let lo = Math.min(...all.map(p=>p.v)), hi = Math.max(...all.map(p=>p.v)); if (hi===lo){ hi+=1; lo-=1; } const pad=(hi-lo)*.08; lo-=pad; hi+=pad;
-  const L=64, R=12, T=12, B=28, W=r.width-L-R, H=r.height-T-B;
+  // Axis labels: few decimals when the range is wide, and a left margin measured from the widest label.
+  const span = hi-lo; const axisFmt = (v) => v.toLocaleString('en-US',{maximumFractionDigits: span>500?0:span>20?1:span>1?2:4});
+  ctx.font='11px ui-monospace,monospace';
+  const labels=[0,1,2,3,4].map(i=>axisFmt(lo+(hi-lo)*i/4));
+  const L=Math.ceil(Math.max(...labels.map(t=>ctx.measureText(t).width)))+14, R=12, T=12, B=28, W=r.width-L-R, H=r.height-T-B;
   const X = t => L + (t-t0)/(t1-t0)*W, Y = v => T + (1-(v-lo)/(hi-lo))*H;
   ctx.strokeStyle='#232830'; ctx.fillStyle='#8a93a0'; ctx.font='11px ui-monospace,monospace'; ctx.textAlign='right';
-  for (let i=0;i<=4;i++){ const v = lo + (hi-lo)*i/4, y = Y(v); ctx.beginPath(); ctx.moveTo(L,y); ctx.lineTo(L+W,y); ctx.stroke(); ctx.fillText(fmtP(v), L-8, y+4); }
-  ctx.textAlign='center'; const ticks = win==='24h'?6:win==='7d'?7:6;
+  for (let i=0;i<=4;i++){ const v = lo + (hi-lo)*i/4, y = Y(v); ctx.beginPath(); ctx.moveTo(L,y); ctx.lineTo(L+W,y); ctx.stroke(); ctx.fillText(labels[i], L-8, y+4); }
+  ctx.textAlign='center'; const ticks = Math.max(2, Math.min(win==='24h'?6:win==='7d'?7:6, Math.floor(W/72)));
   for (let i=0;i<=ticks;i++){ const t = t0 + (t1-t0)*i/ticks, x = X(t); const d = new Date(t*1000); ctx.fillText(win==='24h' ? d.toISOString().slice(11,16) : d.toISOString().slice(5,10).replace('-','/'), x, r.height-8); }
   const pts=[];
   for (const o of ORDER){
@@ -113,8 +117,10 @@ $('#chart').addEventListener('mousemove', (e)=>{
   const cv=$('#chart'), pts=cv._pts||[]; if(!pts.length) return; const r=cv.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top;
   let best=null, bd=18*18; for(const q of pts){ const d=(q.x-mx)**2+(q.y-my)**2; if(d<bd){bd=d;best=q;} }
   const tip=$('#tip'); if(!best){ tip.style.display='none'; return; }
-  tip.style.display='block'; tip.style.left=(best.x+14)+'px'; tip.style.top=(best.y+2)+'px';
   tip.innerHTML=`<b style="color:${COLORS[best.o]}">${NAMES[best.o]}</b> ${fmtP(best.p.v)}<br>${ts(best.p.t)}<br>gas ${fmtU(best.p.c)}${best.p.n>1?` <span style="color:#8a93a0">(1/${best.p.n} of tx)</span>`:''}${best.p.op?' <span style="color:#f59e0b">optimistic</span>':''}`;
+  tip.style.display='block'; tip.style.top=(best.y+2)+'px';
+  const panelW = cv.parentElement.clientWidth, tw = tip.offsetWidth;
+  tip.style.left = (best.x + 14 + tw > panelW - 8 ? Math.max(4, best.x - tw - 14) : best.x + 14) + 'px';
 });
 $('#chart').addEventListener('mouseleave', ()=> $('#tip').style.display='none');
 
