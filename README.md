@@ -10,10 +10,8 @@ event it emitted. Nothing is sampled or estimated. Under the chart, per oracle a
 per window: how many times it wrote, the largest move between two consecutive
 writes, and what that gas cost in dollars.
 
-Seven pairs: ETH, BTC, cbBTC, WLFI, PYUSD, USDe, sUSDe — every USD feed that both
-RedStone's Ethereum adapter and Chainlink publish. Chronicle is shown where a
-scribe for the pair has been verified on-chain; elsewhere it is marked *not
-tracked*, which is not a claim that no feed exists.
+Two pairs, ETH / USD and BTC / USD: the ones all three oracles publish on
+Ethereum, each read from a contract verified on-chain.
 
 ## Two views
 
@@ -23,9 +21,7 @@ is the point.
 
 **vs median** — each write as its distance, in basis points, from the median of
 the oracles' latest values at that moment. This is where the lines come apart: it
-shows which oracle moved first, which lagged, and by how much. With two oracles
-the median is simply their midpoint, so each sits at half the gap — a swing is
-not one of them being wrong.
+shows which oracle moved first, which lagged, and by how much.
 
 ## How the numbers are made
 
