@@ -1,5 +1,7 @@
 import { createServer } from 'node:http';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from 'node:fs';
+import { resolve, extname, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PAIRS, ORACLES, REDSTONE_ADAPTER, COST_RULE, CHAIN, oraclesFor } from './src/config.mjs';
 import { TOPIC, feedIdBytes32, decodeChainlink, decodeRedstone, decodeChronicle } from './src/decode.mjs';
 import { blockNumber, aggregatorOf, ethUsd, fetchLogs, rpcLogs, receiptsFor, hasHyperSync } from './src/sources.mjs';
@@ -91,6 +93,8 @@ async function poll() {
 
 // ---- HTTP ----
 const INDEX = new URL('./public/index.html', import.meta.url);
+const PUBLIC = fileURLToPath(new URL('./public', import.meta.url));
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.ttf': 'font/ttf', '.woff': 'font/woff', '.woff2': 'font/woff2', '.json': 'application/json', '.txt': 'text/plain' };
 const json = (res, body, code = 200) => { res.writeHead(code, { 'content-type': 'application/json', 'access-control-allow-origin': '*', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
 
 createServer((req, res) => {
@@ -110,6 +114,13 @@ createServer((req, res) => {
     return json(res, { pair, oracles: oraclesFor(pair), ethUsd: state.ethUsd, costRule: COST_RULE, stats: out });
   }
   if (url.pathname === '/' || url.pathname === '/index.html') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); return res.end(readFileSync(INDEX)); }
+  // Static files under public/ (logo, fonts). Path is resolved inside public/ only.
+  const file = resolve(PUBLIC, '.' + decodeURIComponent(url.pathname));
+  if (file.startsWith(PUBLIC + sep) && existsSync(file) && statSync(file).isFile()) {
+    const type = MIME[extname(file).toLowerCase()] || 'application/octet-stream';
+    res.writeHead(200, { 'content-type': type, 'cache-control': 'public, max-age=86400' });
+    return res.end(readFileSync(file));
+  }
   res.writeHead(404); res.end('not found');
 }).listen(PORT, () => console.log(`[http] listening on ${PORT}`));
 

@@ -4,67 +4,200 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Oracle Ledger</title>
+<link rel="icon" type="image/svg+xml" href="assets/redstone-logo.svg">
+<link rel="alternate icon" type="image/png" href="assets/redstone-logo.png">
 <style>
-  :root { --bg:#0b0d10; --panel:#12151a; --line:#232830; --ink:#e8ebef; --dim:#8a93a0; --cl:#3b82f6; --ch:#22c55e; --rs:#e11d48; }
+  @font-face { font-family:'Roboto Mono'; src:url('assets/fonts/RobotoMono-Regular.ttf') format('truetype'); font-weight:400; font-display:swap; }
+  @font-face { font-family:'Roboto Mono'; src:url('assets/fonts/RobotoMono-Medium.ttf') format('truetype'); font-weight:500; font-display:swap; }
+  @font-face { font-family:'Roboto Mono'; src:url('assets/fonts/RobotoMono-SemiBold.ttf') format('truetype'); font-weight:600; font-display:swap; }
+  @font-face { font-family:'Roboto Mono'; src:url('assets/fonts/RobotoMono-Bold.ttf') format('truetype'); font-weight:700; font-display:swap; }
+  :root { --bg:#0b0d10; --panel:#12151a; --hov:#1a1e25; --line:#232830; --ink:#e8ebef; --dim:#8a93a0; --cl:#3b82f6; --ch:#22c55e; --rs:#e11d48; }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 'Roboto Mono',ui-monospace,SFMono-Regular,Menlo,monospace; }
+  a { color:var(--ink); } a:hover { color:#fff; }
   .wrap { max-width:1180px; margin:0 auto; padding:28px 20px 60px; }
-  header { display:flex; flex-wrap:wrap; gap:14px 24px; align-items:baseline; justify-content:space-between; margin-bottom:18px; }
-  h1 { font-size:22px; margin:0; letter-spacing:-.01em; }
-  h1 span { color:var(--dim); font-weight:400; font-size:13px; margin-left:12px; }
+  header { display:grid; gap:12px; margin-bottom:18px; }
+  .brand { display:flex; align-items:center; gap:10px; min-width:0; }
+  .brand img { height:22px; width:auto; display:block; flex:none; }
+  h1 { font-size:22px; line-height:1.25; margin:0; letter-spacing:-.01em; font-weight:700; white-space:nowrap; flex:none; }
+  .sub, .status { color:var(--dim); font-size:13px; line-height:1.4; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .status { font-size:12px; }
   .controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
-  select,button { background:var(--panel); color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:7px 12px; font:inherit; cursor:pointer; }
-  button[aria-pressed="true"] { background:var(--ink); color:var(--bg); border-color:var(--ink); }
-  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
-  .legend { display:flex; gap:18px; font-size:12px; color:var(--dim); margin-bottom:8px; flex-wrap:wrap; }
-  .legend i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; vertical-align:-1px; }
-  canvas { width:100%; height:380px; display:block; }
-  .tip { position:absolute; pointer-events:none; background:#000; border:1px solid var(--line); border-radius:6px; padding:6px 9px; font-size:12px; display:none; white-space:nowrap; }
+  select,button.ctl { background:var(--panel); color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:7px 12px; font:inherit; cursor:pointer; white-space:nowrap; flex:none; }
+  button.ctl[aria-pressed="true"] { background:var(--ink); color:var(--bg); border-color:var(--ink); }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; min-width:0; }
+  .ptop { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:8px; flex-wrap:wrap; }
+  .legend { display:flex; gap:18px; font-size:12px; color:var(--dim); flex-wrap:wrap; align-items:center; }
+  .legend button { display:inline-flex; align-items:center; gap:6px; background:none; border:0; padding:0; font:inherit; font-size:12px; color:var(--dim); cursor:pointer; }
+  .legend button[aria-pressed="false"] { opacity:.45; text-decoration:line-through; }
+  .legend .ring { width:14px; height:14px; border-radius:50%; border:4px solid; background:var(--panel); box-sizing:border-box; flex:none; }
+  .legend .n { white-space:nowrap; }
+  .more { position:relative; display:flex; align-items:center; }
+  .more > button { width:28px; height:28px; margin:-4px -6px -4px 0; border-radius:6px; border:1px solid transparent; background:transparent; color:var(--dim); font:inherit; font-size:16px; line-height:1; cursor:pointer; }
+  .more > button:hover { color:var(--ink); background:var(--hov); border-color:var(--line); }
+  .menu { position:absolute; right:-6px; top:30px; z-index:6; min-width:172px; background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:6px; box-shadow:0 10px 28px rgba(0,0,0,.5); display:none; gap:2px; }
+  .menu[data-open="1"] { display:grid; }
+  .menu button { text-align:left; background:transparent; border:0; border-radius:6px; padding:7px 10px; font:inherit; font-size:13px; color:var(--ink); cursor:pointer; }
+  .menu button:hover { background:var(--hov); }
+  .plot { position:relative; }
+  .plot svg { display:block; overflow:visible; cursor:crosshair; }
+  .lyr { position:absolute; inset:0; pointer-events:none; }
+  .lyr div { position:absolute; font-size:11px; line-height:11px; color:var(--dim); white-space:nowrap; }
+  .cad .lyr div, .rad .lyr div { font-size:10px; line-height:11px; }
+  .tip { position:absolute; pointer-events:none; z-index:5; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:12px; min-width:220px; box-shadow:0 8px 24px rgba(0,0,0,.45); display:none; }
+  .tip .when { font-size:11px; font-weight:500; color:var(--dim); letter-spacing:.02em; margin-bottom:8px; }
+  .tip .r { display:flex; align-items:center; gap:8px; padding:2px 6px; margin:0 -6px; border-radius:4px; }
+  .tip .r.on { background:var(--hov); }
+  .tip .r .ring { width:12px; height:12px; border-radius:50%; border:3px solid; background:var(--panel); box-sizing:border-box; flex:none; }
+  .tip .r .nm { color:var(--dim); min-width:76px; }
+  .tip .r .v { margin-left:auto; font-weight:500; font-variant-numeric:tabular-nums; }
+  .tip .r .b { font-size:11px; padding:1px 6px; border-radius:4px; min-width:66px; text-align:right; font-variant-numeric:tabular-nums; background:var(--hov); color:var(--dim); }
+  .tip .r .b.hot { background:rgba(245,158,11,.14); color:#f59e0b; }
+  .tip .ft { margin-top:8px; padding-top:8px; border-top:1px solid var(--line); font-size:11px; color:var(--dim); }
+  .tip.sm { min-width:0; width:168px; padding:8px 10px; }
+  .tip.sm .r { font-size:12px; padding:0; margin:0; }
+  .tip.sm .sq { width:10px; height:10px; border-radius:2px; flex:none; }
   .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; margin-top:12px; }
   .card h3 { margin:0 0 10px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px; }
+  .card h3 i { display:inline-block; width:10px; height:10px; border-radius:2px; }
   .row { display:flex; justify-content:space-between; padding:5px 0; border-top:1px solid var(--line); font-size:13px; }
   .row:first-of-type { border-top:0; }
   .row span:first-child { color:var(--dim); }
   .row small { display:block; color:var(--dim); font-size:11px; }
+  .vh3 { margin:0 0 2px; font-size:13px; font-weight:600; }
+  .vsub { font-size:11px; color:var(--dim); margin-bottom:10px; }
+  .vwrap { display:flex; flex-direction:column; align-items:center; gap:12px; }
+  .keys { width:100%; display:grid; gap:2px; border-top:1px solid var(--line); padding-top:10px; }
+  .keys .k { display:flex; align-items:center; gap:8px; padding:5px 8px; margin:0 -8px; border-radius:6px; cursor:pointer; font-size:12px; flex-wrap:nowrap; min-width:0; }
+  .rad .keys .k { flex-wrap:wrap; }
+  .keys .k.on { background:var(--hov); }
+  .keys .k .ring { width:12px; height:12px; border-radius:50%; border:3px solid; background:var(--panel); box-sizing:border-box; flex:none; }
+  .keys .k .v { margin-left:auto; font-weight:500; font-variant-numeric:tabular-nums; }
+  .keys .k .p { color:var(--dim); min-width:34px; text-align:right; font-variant-numeric:tabular-nums; }
+  .keys .k .note { margin-left:auto; color:var(--dim); font-size:11px; }
+  .dwrap { position:relative; width:176px; height:176px; }
+  .dctr { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; pointer-events:none; padding:0 30px; }
+  .dctr b { font-size:20px; font-weight:600; line-height:1.1; font-variant-numeric:tabular-nums; }
+  .dctr span { font-size:11px; color:var(--dim); margin-top:4px; }
   .foot { color:var(--dim); font-size:12px; margin-top:14px; line-height:1.7; }
-  .status { color:var(--dim); font-size:12px; }
   .warn { color:#f59e0b; }
-  @media (max-width:640px){ canvas{height:260px} }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <h1>Oracle Ledger <span>every on-chain update, side by side · Ethereum</span></h1>
+    <div class="brand">
+      <img src="assets/redstone-logo.svg" alt="RedStone">
+      <h1>Oracle Ledger</h1>
+      <span class="sub">every on-chain update, side by side · Ethereum</span>
+    </div>
     <div class="controls">
       <select id="pair"></select>
-      <button data-w="24h">24h</button><button data-w="7d">7d</button><button data-w="30d" aria-pressed="true">30d</button>
+      <button class="ctl" data-w="24h">24h</button><button class="ctl" data-w="7d">7d</button><button class="ctl" data-w="30d" aria-pressed="true">30d</button>
       <span style="width:8px"></span>
-      <button data-v="price" aria-pressed="true" title="what each oracle wrote">price</button><button data-v="spread" title="how far each write sits from the median of the three">vs median</button>
-      <span class="status" id="status">loading…</span>
+      <button class="ctl" data-v="price" aria-pressed="true" title="what each oracle wrote">price</button><button class="ctl" data-v="spread" title="how far each write sits from the median of the three">vs median</button>
     </div>
+    <div class="status" id="status">loading…</div>
   </header>
 
-  <div class="panel" style="position:relative;overflow:hidden">
-    <div class="legend"><span><i style="background:var(--cl)"></i>Chainlink</span><span><i style="background:var(--ch)"></i>Chronicle</span><span><i style="background:var(--rs)"></i>RedStone</span><span id="count"></span></div>
-    <canvas id="chart"></canvas>
+  <div class="panel" id="mpanel">
+    <div class="ptop">
+      <div class="legend" id="legend"></div>
+      <div class="more" id="more">
+        <button type="button" aria-label="More actions" id="moreBtn">···</button>
+        <div class="menu" id="menu">
+          <button type="button" id="mCsv">Export CSV</button>
+          <button type="button" id="mRefresh">Refresh now</button>
+          <button type="button" id="mCopy">Copy link</button>
+        </div>
+      </div>
+    </div>
+    <div class="plot" id="plot">
+      <svg id="chart" width="100%" height="380"></svg>
+      <div class="lyr" id="labels"></div>
+    </div>
     <div class="tip" id="tip"></div>
   </div>
 
   <div class="grid" id="stats"></div>
 
+  <div class="grid">
+    <div class="panel cad">
+      <h3 class="vh3">Update cadence</h3>
+      <div class="vsub" id="cadSub"></div>
+      <div class="plot" id="cadPlot">
+        <svg id="cadSvg" width="100%" height="190"></svg>
+        <div class="lyr" id="cadLabels"></div>
+        <div class="tip sm" id="cadTip"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3 class="vh3">Gas share</h3>
+      <div class="vsub" id="donSub"></div>
+      <div class="vwrap">
+        <div class="dwrap">
+          <svg width="176" height="176" id="donSvg" style="display:block"></svg>
+          <div class="dctr"><b id="donBig"></b><span id="donSmall"></span></div>
+        </div>
+        <div class="keys" id="donKeys"></div>
+      </div>
+    </div>
+
+    <div class="panel rad">
+      <h3 class="vh3">Profile</h3>
+      <div class="vsub" id="radSub"></div>
+      <div class="vwrap">
+        <div class="plot" style="width:248px;max-width:100%">
+          <svg id="radSvg" width="248" height="200" style="display:block"></svg>
+          <div class="lyr" id="radLabels"></div>
+        </div>
+        <div class="keys" id="radKeys"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="foot" id="foot"></div>
 </div>
 
 <script>
+/* Flip these to change how the main chart is drawn. */
+const CONFIG = { area:false, smooth:false, dots:true, grid:true, height:380, heightNarrow:260, animate:true };
+
 const COLORS = { chainlink:'#3b82f6', chronicle:'#22c55e', redstone:'#e11d48' };
 const NAMES = { chainlink:'Chainlink', chronicle:'Chronicle', redstone:'RedStone' };
 const ORDER = ['chainlink','chronicle','redstone'];
-let pair = new URLSearchParams(location.search).get('pair') || 'ETH', win = '30d', view = 'price', data = null, stats = null, rule = {};
+const SECS = { '24h':86400, '7d':604800, '30d':2592000 };
+let pair = new URLSearchParams(location.search).get('pair') || 'ETH', win = '30d', view = 'price';
+let data = null, stats = null, rule = {}, hidden = {}, mainPts = [], cadGeo = null, cadCounts = null, mounted = false;
 
-// "vs median": for every write, the median of the three oracles' latest values at that moment,
-// and the write's distance from it in basis points. Lines that sit on top of each other in
-// price terms come apart here — this is where the differences live.
+const $ = (s) => document.querySelector(s);
+const SVGNS = 'http://www.w3.org/2000/svg';
+const NS = (n, a) => { const e = document.createElementNS(SVGNS, n); for (const k in a) e.setAttribute(k, a[k]); return e; };
+const fmtP = (v) => v >= 1000 ? v.toLocaleString('en-US',{maximumFractionDigits:2}) : v.toLocaleString('en-US',{maximumFractionDigits:4});
+const fmtU = (v) => v == null ? 'n/a' : '$' + v.toFixed(2);
+const fmtUsd = (v) => '$' + v.toLocaleString('en-US',{maximumFractionDigits: v >= 100 ? 0 : 2});
+const age = (s) => s == null ? 'n/a' : s < 90 ? s + 's' : s < 5400 ? Math.round(s/60) + 'm' : s < 172800 ? (s/3600).toFixed(1) + 'h' : (s/86400).toFixed(1) + 'd';
+const ts = (t) => new Date(t*1000).toISOString().slice(5,16).replace('T',' ') + ' UTC';
+const dayLabel = (t) => new Date(t*1000).toISOString().slice(5,10).replace('-','/');
+const hourLabel = (t) => new Date(t*1000).toISOString().slice(11,16);
+const ring = (c, s, b) => `width:${s}px;height:${s}px;border-color:${c}`;
+let _ctx;
+function textW(t, px){ _ctx = _ctx || document.createElement('canvas').getContext('2d'); _ctx.font = px + "px 'Roboto Mono',ui-monospace,monospace"; return _ctx.measureText(t).width; }
+const visible = () => ORDER.filter(o => trackedSet().has(o) && !hidden[o]);
+const trackedSet = () => new Set(stats ? (stats.oracles || ORDER) : ORDER);
+function label(layer, x, y, text, anchor){
+  const d = document.createElement('div');
+  d.textContent = text;
+  d.style.left = x + 'px'; d.style.top = y + 'px';
+  d.style.transform = 'translate(' + (anchor === 'end' ? '-100%' : anchor === 'middle' ? '-50%' : '0') + ',-50%)';
+  layer.appendChild(d);
+  return d;
+}
+
+/* "vs median": for every write, the median of the oracles' latest values at that moment,
+   and the write's distance from it in basis points. Lines that sit on top of each other
+   in price terms come apart here. */
 function spreadSeries(updates){
   const merged = ORDER.flatMap(o => (updates[o]||[]).map(p => ({...p, o}))).sort((a,b)=>a.t-b.t);
   const last = {}; const out = Object.fromEntries(ORDER.map(o=>[o,[]]));
@@ -77,11 +210,19 @@ function spreadSeries(updates){
   }
   return out;
 }
-const $ = (s) => document.querySelector(s);
-const fmtP = (v) => v >= 1000 ? v.toLocaleString('en-US',{maximumFractionDigits:2}) : v.toLocaleString('en-US',{maximumFractionDigits:4});
-const fmtU = (v) => v == null ? '—' : '$' + v.toFixed(2);
-const age = (s) => s == null ? '—' : s < 90 ? s + 's' : s < 5400 ? Math.round(s/60) + 'm' : s < 172800 ? (s/3600).toFixed(1) + 'h' : (s/86400).toFixed(1) + 'd';
-const ts = (t) => new Date(t*1000).toISOString().slice(5,16).replace('T',' ') + ' UTC';
+function monotone(p){
+  const n = p.length, m = new Array(n), d = new Array(n-1);
+  for (let i=0;i<n-1;i++){ const dx = (p[i+1].x-p[i].x)||1e-6; d[i] = (p[i+1].y-p[i].y)/dx; }
+  m[0] = d[0]; m[n-1] = d[n-2];
+  for (let i=1;i<n-1;i++) m[i] = d[i-1]*d[i] <= 0 ? 0 : (2*d[i-1]*d[i])/(d[i-1]+d[i]);
+  let s = 'M' + p[0].x.toFixed(1) + ' ' + p[0].y.toFixed(1);
+  for (let i=0;i<n-1;i++){
+    const dx = (p[i+1].x-p[i].x)/3;
+    s += 'C' + (p[i].x+dx).toFixed(1) + ' ' + (p[i].y+m[i]*dx).toFixed(1) + ' ' + (p[i+1].x-dx).toFixed(1) + ' ' + (p[i+1].y-m[i+1]*dx).toFixed(1) + ' ' + p[i+1].x.toFixed(1) + ' ' + p[i+1].y.toFixed(1);
+  }
+  return s;
+}
+const linePath = (pts, smooth) => !pts.length ? '' : (smooth && pts.length > 2 ? monotone(pts) : pts.map((p,i)=>(i?'L':'M')+p.x.toFixed(1)+' '+p.y.toFixed(1)).join(''));
 
 async function loadPairs(){
   const p = await (await fetch('/api/pairs')).json();
@@ -98,72 +239,291 @@ async function refresh(){
   const bf = h.backfill || {};
   $('#status').innerHTML = bf.status === 'running' ? `<span class="warn">backfilling ${h.historyDays} days via ${h.source}…</span>`
     : `updated ${new Date().toLocaleTimeString('en-GB')} · block ${h.lastBlock} · ETH $${(h.ethUsd||0).toFixed(0)}`;
-  draw(); renderStats();
+  renderAll();
   history.replaceState(null,'',`?pair=${pair}`);
 }
+function renderAll(){ renderLegend(); drawMain(); renderStats(); drawCadence(); drawDonut(); drawRadar(); }
 
-function draw(){
-  const cv = $('#chart'), dpr = Math.min(2, devicePixelRatio||1), r = cv.getBoundingClientRect();
-  cv.width = r.width*dpr; cv.height = r.height*dpr; const ctx = cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
-  ctx.clearRect(0,0,r.width,r.height); $('#tip').style.display='none';
+/* ---------- main chart ---------- */
+function drawMain(){
+  const svg = $('#chart'), lyr = $('#labels');
+  svg.innerHTML = ''; lyr.innerHTML = ''; hideTip(); mainPts = [];
+  if (!data) return;
+  const H = innerWidth <= 640 ? CONFIG.heightNarrow : CONFIG.height;
+  svg.setAttribute('height', H);
+  const W = Math.round(svg.getBoundingClientRect().width) || 800;
+  const vis = visible();
   const series = view === 'spread' ? spreadSeries(data.updates) : data.updates;
-  const all = ORDER.flatMap(o => (series[o]||[]).map(p => ({...p,o})));
+  const all = vis.flatMap(o => (series[o]||[]).map(p => ({...p,o})));
   $('#count').textContent = all.length ? `${all.length} updates in view` : '';
-  if (!all.length){ ctx.fillStyle='#8a93a0'; ctx.fillText('no updates in this window yet', 16, 30); cv._pts=[]; return; }
-  const now = Date.now()/1000, secs = {'24h':86400,'7d':604800,'30d':2592000}[win];
-  const t0 = now - secs, t1 = now;
-  let lo = Math.min(...all.map(p=>p.v)), hi = Math.max(...all.map(p=>p.v)); if (hi===lo){ hi+=1; lo-=1; } const pad=(hi-lo)*.08; lo-=pad; hi+=pad;
-  // Axis labels: few decimals when the range is wide, and a left margin measured from the widest label.
-  const span = hi-lo; const axisFmt = view === 'spread' ? (v) => (v>0?'+':'') + v.toFixed(span>20?0:1) + ' bps' : (v) => v.toLocaleString('en-US',{maximumFractionDigits: span>500?0:span>20?1:span>1?2:4});
-  ctx.font='11px ui-monospace,monospace';
-  const labels=[0,1,2,3,4].map(i=>axisFmt(lo+(hi-lo)*i/4));
-  const L=Math.ceil(Math.max(...labels.map(t=>ctx.measureText(t).width)))+14, R=12, T=12, B=28, W=r.width-L-R, H=r.height-T-B;
-  const X = t => L + (t-t0)/(t1-t0)*W, Y = v => T + (1-(v-lo)/(hi-lo))*H;
-  ctx.strokeStyle='#232830'; ctx.fillStyle='#8a93a0'; ctx.font='11px ui-monospace,monospace'; ctx.textAlign='right';
-  for (let i=0;i<=4;i++){ const v = lo + (hi-lo)*i/4, y = Y(v); ctx.beginPath(); ctx.moveTo(L,y); ctx.lineTo(L+W,y); ctx.stroke(); ctx.fillText(labels[i], L-8, y+4); }
-  if (view === 'spread' && lo < 0 && hi > 0){ ctx.strokeStyle='#4b5563'; ctx.setLineDash([4,4]); ctx.beginPath(); ctx.moveTo(L,Y(0)); ctx.lineTo(L+W,Y(0)); ctx.stroke(); ctx.setLineDash([]); }
-  ctx.textAlign='center'; const ticks = Math.max(2, Math.min(win==='24h'?6:win==='7d'?7:6, Math.floor(W/72)));
-  for (let i=0;i<=ticks;i++){ const t = t0 + (t1-t0)*i/ticks, x = X(t); const d = new Date(t*1000); ctx.fillText(win==='24h' ? d.toISOString().slice(11,16) : d.toISOString().slice(5,10).replace('-','/'), x, r.height-8); }
-  const pts=[];
-  for (const o of ORDER){
-    const s = (series[o]||[]).filter(p=>p.t>=t0); if(!s.length) continue;
-    ctx.strokeStyle=COLORS[o]; ctx.lineWidth=1.5; ctx.beginPath();
-    s.forEach((p,i)=>{ const x=X(p.t), y=Y(p.v); i?ctx.lineTo(x,y):ctx.moveTo(x,y); pts.push({x,y,p,o}); }); ctx.stroke();
-    ctx.fillStyle=COLORS[o]; for (const q of pts.filter(q=>q.o===o)){ ctx.beginPath(); ctx.arc(q.x,q.y,2.4,0,Math.PI*2); ctx.fill(); }
-  }
-  cv._pts = pts;
-}
-$('#chart').addEventListener('mousemove', (e)=>{
-  const cv=$('#chart'), pts=cv._pts||[]; if(!pts.length) return; const r=cv.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top;
-  let best=null, bd=18*18; for(const q of pts){ const d=(q.x-mx)**2+(q.y-my)**2; if(d<bd){bd=d;best=q;} }
-  const tip=$('#tip'); if(!best){ tip.style.display='none'; return; }
-  tip.innerHTML=`<b style="color:${COLORS[best.o]}">${NAMES[best.o]}</b> ${view==='spread' ? `${best.p.v>0?'+':''}${best.p.v.toFixed(2)} bps <span style="color:#8a93a0">· ${fmtP(best.p.price)}</span>` : fmtP(best.p.v)}<br>${ts(best.p.t)}<br>gas ${fmtU(best.p.c)}${best.p.n>1?` <span style="color:#8a93a0">(1/${best.p.n} of tx)</span>`:''}${best.p.op?' <span style="color:#f59e0b">optimistic</span>':''}`;
-  tip.style.display='block'; tip.style.top=(best.y+2)+'px';
-  const panelW = cv.parentElement.clientWidth, tw = tip.offsetWidth;
-  tip.style.left = (best.x + 14 + tw > panelW - 8 ? Math.max(4, best.x - tw - 14) : best.x + 14) + 'px';
-});
-$('#chart').addEventListener('mouseleave', ()=> $('#tip').style.display='none');
+  if (!all.length){ label(lyr, 16, 20, 'no updates in this window yet', 'start'); return; }
 
+  const now = Date.now()/1000, t1 = now, t0 = now - SECS[win];
+  let lo = Math.min(...all.map(p=>p.v)), hi = Math.max(...all.map(p=>p.v));
+  if (hi === lo){ hi += 1; lo -= 1; } const pad = (hi-lo)*.08; lo -= pad; hi += pad;
+  const span = hi - lo;
+  const axisFmt = view === 'spread' ? (v) => (v>0?'+':'') + v.toFixed(span>20?0:1) + ' bps' : (v) => v.toLocaleString('en-US',{maximumFractionDigits: span>500?0:span>20?1:span>1?2:4});
+  const labels = [0,1,2,3,4].map(i => axisFmt(lo + (hi-lo)*i/4));
+  const L = Math.ceil(Math.max(...labels.map(t => textW(t,11)))) + 14, R = 12, T = 30, B = 28;
+  const PW = W - L - R, PH = H - T - B;
+  const X = t => L + (t-t0)/(t1-t0)*PW, Y = v => T + (1-(v-lo)/(hi-lo))*PH;
+
+  labels.forEach((tx, i) => {
+    const y = Y(lo + (hi-lo)*i/4);
+    if (CONFIG.grid) svg.appendChild(NS('line',{x1:L,x2:L+PW,y1:y.toFixed(1),y2:y.toFixed(1),stroke:'#232830','stroke-width':1}));
+    label(lyr, L-8, y, tx, 'end');
+  });
+  let zero = null;
+  if (view === 'spread' && lo < 0 && hi > 0){ zero = Y(0); svg.appendChild(NS('line',{x1:L,x2:L+PW,y1:zero.toFixed(1),y2:zero.toFixed(1),stroke:'#4b5563','stroke-width':1})); }
+  const ticks = Math.max(2, Math.min(win==='24h'?6:7, Math.floor(PW/72)));
+  for (let i=0;i<=ticks;i++){ const t = t0 + (t1-t0)*i/ticks; label(lyr, X(t), H-12, win==='24h' ? hourLabel(t) : dayLabel(t), 'middle'); }
+
+  if (CONFIG.area){
+    const defs = NS('defs',{});
+    for (const o of vis){
+      const g = NS('linearGradient',{id:'g-'+o,x1:0,y1:0,x2:0,y2:1});
+      g.appendChild(NS('stop',{offset:'0%','stop-color':COLORS[o],'stop-opacity':.28}));
+      g.appendChild(NS('stop',{offset:'100%','stop-color':COLORS[o],'stop-opacity':.02}));
+      defs.appendChild(g);
+    }
+    svg.appendChild(defs);
+  }
+  const base = zero != null ? zero : T + PH, sparse = all.length <= 150, dense = all.length > 600;
+  for (const o of vis){
+    const pts = (series[o]||[]).filter(p => p.t >= t0).map(p => ({ x:X(p.t), y:Y(p.v), p }));
+    if (!pts.length) continue;
+    pts.forEach(q => mainPts.push({ x:q.x, y:q.y, p:q.p, o }));
+    const d = linePath(pts, CONFIG.smooth);
+    if (CONFIG.area) svg.appendChild(NS('path',{ d: d + 'L' + pts[pts.length-1].x.toFixed(1) + ' ' + base.toFixed(1) + 'L' + pts[0].x.toFixed(1) + ' ' + base.toFixed(1) + 'Z', fill:'url(#g-'+o+')', stroke:'none' }));
+    svg.appendChild(NS('path',{ d, fill:'none', stroke:COLORS[o], 'stroke-width':2, 'stroke-linejoin':'round', 'stroke-linecap':'round' }));
+    if (CONFIG.dots && !dense) for (const q of pts) svg.appendChild(NS('circle',{ cx:q.x.toFixed(1), cy:q.y.toFixed(1), r:sparse?3.5:2.2, fill:sparse?'#12151a':COLORS[o], stroke:COLORS[o], 'stroke-width':sparse?2:0 }));
+  }
+  svg._geo = { T, PH };
+}
+function hideTip(){ $('#tip').style.display = 'none'; const c = $('#chart').querySelector('.cursor'); if (c) c.remove(); }
+$('#chart').addEventListener('mousemove', (e) => {
+  if (!mainPts.length) return;
+  const svg = $('#chart'), r = svg.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  let best = null, bd = 18*18;
+  for (const q of mainPts){ const d = (q.x-mx)**2 + (q.y-my)**2; if (d < bd){ bd = d; best = q; } }
+  if (!best){ hideTip(); return; }
+  hideTip();
+  const g = svg._geo || { T:30, PH:300 }, cur = NS('g',{class:'cursor'});
+  cur.appendChild(NS('line',{x1:best.x.toFixed(1),x2:best.x.toFixed(1),y1:g.T,y2:(g.T+g.PH).toFixed(1),stroke:'#3a414c','stroke-width':1}));
+  cur.appendChild(NS('circle',{cx:best.x.toFixed(1),cy:best.y.toFixed(1),r:5,fill:'#12151a',stroke:COLORS[best.o],'stroke-width':2}));
+  svg.appendChild(cur);
+
+  const vis = visible(), tStar = best.p.t, latest = {};
+  for (const o of vis){ const arr = data.updates[o] || []; let v = null; for (let i=arr.length-1;i>=0;i--) if (arr[i].t <= tStar){ v = arr[i].v; break; } latest[o] = v; }
+  const vals = Object.values(latest).filter(v=>v!=null).sort((a,b)=>a-b);
+  const med = vals.length ? (vals.length%2 ? vals[vals.length>>1] : (vals[vals.length/2-1]+vals[vals.length/2])/2) : null;
+  const rows = vis.map(o => {
+    const v = latest[o], bps = (v != null && med && vals.length >= 2) ? (v-med)/med*1e4 : null, hot = bps != null && Math.abs(bps) >= 10;
+    return `<div class="r ${o===best.o?'on':''}"><span class="ring" style="${ring(COLORS[o],12)}"></span><span class="nm">${NAMES[o]}</span><span class="v">${v==null?'n/a':fmtP(v)}</span><span class="b ${hot?'hot':''}" style="${bps==null?'visibility:hidden':''}">${bps==null?'':(bps>0?'+':'')+bps.toFixed(1)+' bps'}</span></div>`;
+  }).join('');
+  const tip = $('#tip');
+  tip.innerHTML = `<div class="when">${ts(tStar)}</div><div>${rows}</div><div class="ft">write by ${NAMES[best.o]} · gas ${fmtU(best.p.c)}${best.p.n>1?` (1/${best.p.n} of tx)`:''}${best.p.op?' · <span style="color:#f59e0b">optimistic</span>':''}</div>`;
+  tip.style.display = 'block';
+  const plot = $('#plot'), panel = $('#mpanel');
+  const hx = plot.offsetLeft + best.x, hy = plot.offsetTop + best.y, tw = tip.offsetWidth, th = tip.offsetHeight;
+  tip.style.left = (hx + 14 + tw > panel.clientWidth - 8 ? Math.max(4, hx - tw - 14) : hx + 14) + 'px';
+  tip.style.top = (hy + 12 + th > panel.clientHeight - 8 ? Math.max(4, hy - th - 12) : hy + 12) + 'px';
+});
+$('#chart').addEventListener('mouseleave', hideTip);
+
+/* ---------- legend ---------- */
+function renderLegend(){
+  const tracked = trackedSet();
+  $('#legend').innerHTML = ORDER.map(o => {
+    const t = tracked.has(o), off = !!hidden[o];
+    return `<button type="button" data-o="${o}" aria-pressed="${t && !off}" title="${!t?'not tracked for this pair':off?'click to show':'click to hide'}" ${t?'':'disabled style="opacity:.45;cursor:default"'}><span class="ring" style="${ring(COLORS[o],14)}"></span>${NAMES[o]}</button>`;
+  }).join('') + '<span class="n" id="count"></span>';
+  $('#legend').querySelectorAll('button[data-o]').forEach(b => b.addEventListener('click', () => {
+    const o = b.dataset.o; hidden[o] = !hidden[o]; renderAll();
+  }));
+}
+
+/* ---------- stat cards ---------- */
 function renderStats(){
-  const s = stats.stats[win]; const tracked = new Set(stats.oracles || ORDER);
-  const cards = ORDER.map(o => { const x = s[o];
-    if (!tracked.has(o)) return `<div class="panel card" style="opacity:.55"><h3><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${COLORS[o]}"></i>${NAMES[o]}</h3><div class="row"><span>Not tracked for this pair<small>no ${NAMES[o]} contract verified on Ethereum for it — this says nothing about whether one exists</small></span><span>—</span></div></div>`;
-    return `<div class="panel card"><h3><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${COLORS[o]}"></i>${NAMES[o]}</h3>
+  const s = stats.stats[win], tracked = trackedSet();
+  $('#stats').innerHTML = ORDER.map(o => { const x = s[o];
+    if (!tracked.has(o)) return `<div class="panel card" style="opacity:.55"><h3><i style="background:${COLORS[o]}"></i>${NAMES[o]}</h3><div class="row"><span>Not tracked for this pair<small>no ${NAMES[o]} contract verified on Ethereum for it; this says nothing about whether one exists</small></span><span>n/a</span></div></div>`;
+    return `<div class="panel card"><h3><i style="background:${COLORS[o]}"></i>${NAMES[o]}</h3>
       <div class="row"><span>Updates (${win})</span><span>${x.updates}</span></div>
       <div class="row"><span>Max deviation<small>between consecutive updates</small></span><span>${x.maxDeviationPct.toFixed(4)}%</span></div>
       <div class="row"><span>Total gas (${win})<small>${rule[o]||''}</small></span><span>${fmtU(x.costTotalUsd)}</span></div>
       <div class="row"><span>Avg per update</span><span>${fmtU(x.costAvgUsd)}</span></div>
       <div class="row"><span>Most expensive</span><span>${fmtU(x.costMaxUsd)}</span></div>
-      <div class="row"><span>Latest on-chain<small>${x.lastAt?ts(x.lastAt):''}</small></span><span>${x.lastValue!=null?fmtP(x.lastValue):'—'} <span style="color:#8a93a0">· ${age(x.ageSeconds)} old</span></span></div>
+      <div class="row"><span>Latest on-chain<small>${x.lastAt?ts(x.lastAt):''}</small></span><span>${x.lastValue!=null?fmtP(x.lastValue):'n/a'} <span style="color:#8a93a0">· ${age(x.ageSeconds)} old</span></span></div>
     </div>`; }).join('');
-  $('#stats').innerHTML = cards;
-  $('#foot').innerHTML = `Every point is one on-chain write, read from the oracle contracts' own events on Ethereum — nothing sampled, nothing estimated. Gas is priced at the current Chainlink ETH/USD ($${(stats.ethUsd||0).toFixed(0)}). RedStone writes several feeds per transaction, so its gas is split evenly across the feeds in that transaction; Chainlink and Chronicle write one feed per transaction. Chronicle points marked <span style="color:#f59e0b">optimistic</span> are OpPoked writes that finalise later. Max deviation is the largest move between two consecutive updates of the same oracle. In the <b>vs median</b> view each write is shown as its distance from the median of the oracles' latest values at that moment${(stats.oracles||[]).length===2?' — with two oracles that median is simply their midpoint, so the two sit at half the gap from each other; a swing is not one of them being wrong':''}. Independent, not affiliated with any oracle.`;
+  $('#foot').innerHTML = `Every point is one on-chain write, read from the oracle contracts' own events on Ethereum. Nothing sampled, nothing estimated. Gas is priced at the current Chainlink ETH/USD ($${(stats.ethUsd||0).toFixed(0)}). RedStone writes several feeds per transaction, so its gas is split evenly across the feeds in that transaction; Chainlink and Chronicle write one feed per transaction. Chronicle points marked <span style="color:#f59e0b">optimistic</span> are OpPoked writes that finalise later. Max deviation is the largest move between two consecutive updates of the same oracle. In the <b>vs median</b> view each write is shown as its distance from the median of the oracles' latest values at that moment${(stats.oracles||[]).length===2?'; with two oracles that median is simply their midpoint, so the two sit at half the gap from each other, and a swing is not one of them being wrong':''}. Independent, not affiliated with any oracle.`;
 }
 
-document.querySelectorAll('button[data-w]').forEach(b=>b.addEventListener('click',()=>{ win=b.dataset.w; document.querySelectorAll('button[data-w]').forEach(x=>x.setAttribute('aria-pressed',x===b)); refresh(); }));
-document.querySelectorAll('button[data-v]').forEach(b=>b.addEventListener('click',()=>{ view=b.dataset.v; document.querySelectorAll('button[data-v]').forEach(x=>x.setAttribute('aria-pressed',x===b)); if(data) draw(); }));
-$('#pair').addEventListener('change', e=>{ pair=e.target.value; refresh(); });
-addEventListener('resize', ()=> data && draw());
+/* ---------- update cadence (stacked area) ---------- */
+function drawCadence(){
+  const svg = $('#cadSvg'), lyr = $('#cadLabels');
+  svg.innerHTML = ''; lyr.innerHTML = ''; $('#cadTip').style.display = 'none';
+  if (!data) return;
+  const vis = visible(), W = Math.round(svg.getBoundingClientRect().width) || 300, H = 190;
+  const step = win === '24h' ? 3600 : win === '7d' ? 21600 : 86400, secs = SECS[win], nb = Math.round(secs/step);
+  const t0 = Date.now()/1000 - secs;
+  $('#cadSub').textContent = `writes per ${step===3600?'hour':step===21600?'6 hours':'day'} · stacked · ${win}`;
+  const counts = vis.map(o => { const a = new Array(nb).fill(0); for (const q of data.updates[o]||[]){ const i = Math.min(nb-1, Math.floor((q.t-t0)/step)); if (i >= 0) a[i]++; } return a; });
+  const totals = new Array(nb).fill(0); counts.forEach(a => a.forEach((c,i) => totals[i] += c));
+  const maxT = Math.max(1, ...totals), niceMax = maxT <= 4 ? maxT : Math.ceil(maxT/4)*4;
+  const L = 30, R = 8, T = 10, B = 22, PW = W - L - R, PH = H - T - B;
+  const xs = i => L + (nb === 1 ? PW/2 : (i/(nb-1))*PW), ys = v => T + (1 - v/niceMax)*PH;
+  cadGeo = { nb, L, PW, T, PH, step, t0, xs, ys, W }; cadCounts = { counts, totals, vis };
+
+  [0, niceMax/2, niceMax].forEach(v => {
+    svg.appendChild(NS('line',{x1:L,x2:L+PW,y1:ys(v).toFixed(1),y2:ys(v).toFixed(1),stroke:'#232830','stroke-width':1}));
+    label(lyr, L-6, ys(v), String(Math.round(v)), 'end');
+  });
+  const every = Math.max(1, Math.round(nb/5));
+  for (let i=0;i<nb;i+=every) label(lyr, xs(i), H-8, win==='24h' ? hourLabel(t0 + i*step) : dayLabel(t0 + i*step), 'middle');
+
+  const defs = NS('defs',{});
+  for (const o of vis){
+    const g = NS('linearGradient',{id:'cg-'+o,x1:0,y1:0,x2:0,y2:1});
+    g.appendChild(NS('stop',{offset:'5%','stop-color':COLORS[o],'stop-opacity':.5}));
+    g.appendChild(NS('stop',{offset:'95%','stop-color':COLORS[o],'stop-opacity':.08}));
+    defs.appendChild(g);
+  }
+  svg.appendChild(defs);
+  const lower = new Array(nb).fill(0); cadCounts.tops = [];
+  vis.forEach((o,k) => {
+    const upper = counts[k].map((c,i) => lower[i] + c);
+    const up = upper.map((v,i) => ({x:xs(i), y:ys(v)})), lo = lower.map((v,i) => ({x:xs(i), y:ys(v)}));
+    const line = linePath(up, CONFIG.smooth), back = linePath(lo.slice().reverse(), CONFIG.smooth).replace(/^M/,'L');
+    svg.appendChild(NS('path',{d:line+back+'Z', fill:'url(#cg-'+o+')', stroke:'none'}));
+    svg.appendChild(NS('path',{d:line, fill:'none', stroke:COLORS[o], 'stroke-width':1.2, 'stroke-linejoin':'round'}));
+    cadCounts.tops.push(upper.slice());
+    for (let i=0;i<nb;i++) lower[i] = upper[i];
+  });
+}
+$('#cadSvg').addEventListener('mousemove', (e) => {
+  if (!cadGeo || !cadCounts) return;
+  const svg = $('#cadSvg'), r = svg.getBoundingClientRect(), mx = e.clientX - r.left;
+  const g = cadGeo, i = Math.max(0, Math.min(g.nb-1, Math.round((mx - g.L)/g.PW*(g.nb-1))));
+  svg.querySelectorAll('.cursor').forEach(n => n.remove());
+  const cur = NS('g',{class:'cursor'});
+  cur.appendChild(NS('line',{x1:g.xs(i).toFixed(1),x2:g.xs(i).toFixed(1),y1:g.T,y2:(g.T+g.PH).toFixed(1),stroke:'#3a414c','stroke-width':1}));
+  cadCounts.vis.forEach((o,k) => cur.appendChild(NS('circle',{cx:g.xs(i).toFixed(1),cy:g.ys(cadCounts.tops[k][i]).toFixed(1),r:3.5,fill:'#12151a',stroke:COLORS[o],'stroke-width':2})));
+  svg.appendChild(cur);
+  const t = g.t0 + i*g.step, t2 = t + g.step;
+  const lab = win === '24h' ? `${hourLabel(t)} to ${hourLabel(t2)} UTC` : win === '7d' ? `${dayLabel(t)} ${hourLabel(t)} UTC` : dayLabel(t);
+  const tip = $('#cadTip');
+  tip.innerHTML = `<div class="when">${lab}</div><div style="display:grid;gap:4px">` +
+    cadCounts.vis.map((o,k) => `<div class="r"><span class="sq" style="background:${COLORS[o]}"></span><span class="nm" style="min-width:0">${NAMES[o]}</span><span class="v">${cadCounts.counts[k][i]}</span></div>`).join('') +
+    `<div class="r" style="border-top:1px solid var(--line);padding-top:4px;margin-top:2px"><span class="nm" style="min-width:0">total</span><span class="v" style="font-weight:600">${cadCounts.totals[i]}</span></div></div>`;
+  tip.style.display = 'block';
+  tip.style.top = '2px';
+  const tw = 168; let lx = g.xs(i) + 12;
+  if (lx + tw > g.W) lx = g.xs(i) - tw - 12;
+  tip.style.left = Math.max(0, Math.min(lx, Math.max(0, g.W - tw))) + 'px';
+});
+$('#cadSvg').addEventListener('mouseleave', () => { $('#cadTip').style.display = 'none'; $('#cadSvg').querySelectorAll('.cursor').forEach(n => n.remove()); });
+
+/* ---------- gas share (donut) ---------- */
+let donHover = null;
+function drawDonut(){
+  const svg = $('#donSvg'); svg.innerHTML = '';
+  if (!stats) return;
+  const s = stats.stats[win], vis = visible();
+  const items = vis.map(o => ({ o, name:NAMES[o], color:COLORS[o], v: s[o] ? s[o].costTotalUsd : 0 }));
+  const total = items.reduce((a,x)=>a+x.v,0), r = 77, circ = 2*Math.PI*r, gap = items.filter(x=>x.v>0).length > 1 ? 3 : 0;
+  $('#donSub').textContent = `share of total gas · ${win}`;
+  svg.appendChild(NS('circle',{cx:88,cy:88,r,fill:'none',stroke:'#1a1e25','stroke-width':22}));
+  const g = NS('g',{transform:'rotate(-90 88 88)'});
+  let acc = 0;
+  items.forEach((x,i) => {
+    const frac = total ? x.v/total : 0, len = Math.max(0, frac*circ - gap);
+    const c = NS('circle',{cx:88,cy:88,r,fill:'none',stroke:x.color,'stroke-width':22,'stroke-dashoffset':(-acc).toFixed(2),
+      'stroke-dasharray': (mounted || !CONFIG.animate ? len.toFixed(2) : 0) + ' ' + (circ - (mounted || !CONFIG.animate ? len : 0)).toFixed(2)});
+    c.style.transition = CONFIG.animate ? `stroke-dasharray .9s cubic-bezier(.2,.7,.2,1) ${i*.08}s, opacity .2s` : 'none';
+    c.style.cursor = 'pointer';
+    c.style.opacity = donHover && donHover !== x.o ? .3 : 1;
+    c.addEventListener('mouseenter', () => { donHover = x.o; drawDonut(); });
+    c.addEventListener('mouseleave', () => { donHover = null; drawDonut(); });
+    if (!mounted && CONFIG.animate) requestAnimationFrame(() => requestAnimationFrame(() => c.setAttribute('stroke-dasharray', len.toFixed(2) + ' ' + (circ-len).toFixed(2))));
+    acc += frac*circ;
+    g.appendChild(c);
+  });
+  svg.appendChild(g);
+  const act = items.find(x => x.o === donHover);
+  $('#donBig').textContent = fmtUsd(act ? act.v : total);
+  $('#donSmall').textContent = act ? `${act.name} · ${total?Math.round(act.v/total*100):0}%` : `gas · ${win}`;
+  $('#donKeys').innerHTML = items.map(x => `<div class="k ${donHover===x.o?'on':''}" data-o="${x.o}"><span class="ring" style="${ring(x.color,12)}"></span><span>${x.name}</span><span class="v">${fmtUsd(x.v)}</span><span class="p">${total?Math.round(x.v/total*100):0}%</span></div>`).join('');
+  $('#donKeys').querySelectorAll('.k').forEach(n => {
+    n.addEventListener('mouseenter', () => { donHover = n.dataset.o; drawDonut(); });
+    n.addEventListener('mouseleave', () => { donHover = null; drawDonut(); });
+  });
+}
+
+/* ---------- profile (radar) ---------- */
+let radHover = null;
+function drawRadar(){
+  const svg = $('#radSvg'), lyr = $('#radLabels');
+  svg.innerHTML = ''; lyr.innerHTML = '';
+  if (!stats) return;
+  const s = stats.stats[win], vis = visible();
+  $('#radSub').textContent = `each axis scaled to the largest oracle in view · ${win}`;
+  const metrics = [
+    { label:'updates', get:x=>x.updates, fmt:v=>String(v) },
+    { label:'max dev', get:x=>x.maxDeviationPct, fmt:v=>v.toFixed(3)+'%' },
+    { label:'gas total', get:x=>x.costTotalUsd, fmt:v=>fmtUsd(v) },
+    { label:'gas / tx', get:x=>x.costAvgUsd||0, fmt:v=>fmtU(v) },
+    { label:'age', get:x=>x.ageSeconds||0, fmt:v=>age(v) },
+  ];
+  const maxes = metrics.map(m => Math.max(0, ...vis.map(o => m.get(s[o])||0)));
+  const cx = 124, cy = 100, R = 64, n = metrics.length;
+  const ang = i => -Math.PI/2 + (i*2*Math.PI)/n;
+  const pt = (i,f) => ({ x: cx + R*f*Math.cos(ang(i)), y: cy + R*f*Math.sin(ang(i)) });
+  [.25,.5,.75,1].forEach(f => svg.appendChild(NS('polygon',{points:metrics.map((_,i)=>{const p=pt(i,f);return p.x.toFixed(1)+','+p.y.toFixed(1);}).join(' '),fill:'none',stroke:'#232830','stroke-width':1})));
+  metrics.forEach((_,i) => { const p = pt(i,1); svg.appendChild(NS('line',{x1:cx,y1:cy,x2:p.x.toFixed(1),y2:p.y.toFixed(1),stroke:'#232830','stroke-width':1})); });
+  vis.forEach(o => {
+    const pts = metrics.map((m,i) => pt(i, maxes[i] ? (m.get(s[o])||0)/maxes[i] : 0));
+    const g = NS('g',{});
+    g.style.opacity = radHover && radHover !== o ? .18 : 1; g.style.transition = 'opacity .2s'; g.style.cursor = 'pointer';
+    g.appendChild(NS('polygon',{points:pts.map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' '),fill:COLORS[o],'fill-opacity':.18,stroke:COLORS[o],'stroke-width':1.5,'stroke-linejoin':'round'}));
+    pts.forEach(p => g.appendChild(NS('circle',{cx:p.x.toFixed(1),cy:p.y.toFixed(1),r:3,fill:COLORS[o]})));
+    g.addEventListener('mouseenter', () => { radHover = o; drawRadar(); });
+    g.addEventListener('mouseleave', () => { radHover = null; drawRadar(); });
+    svg.appendChild(g);
+  });
+  metrics.forEach((m,i) => { const p = pt(i,1.2), c = Math.cos(ang(i)); label(lyr, p.x, p.y, m.label, Math.abs(c) < .2 ? 'middle' : c > 0 ? 'start' : 'end'); });
+  $('#radKeys').innerHTML = vis.map(o => `<div class="k ${radHover===o?'on':''}" data-o="${o}"><span class="ring" style="${ring(COLORS[o],12)}"></span><span>${NAMES[o]}</span><span class="note">${radHover===o?metrics.map(m=>`${m.label} ${m.fmt(m.get(s[o]))}`).join(' · '):''}</span></div>`).join('');
+  $('#radKeys').querySelectorAll('.k').forEach(nd => {
+    nd.addEventListener('mouseenter', () => { radHover = nd.dataset.o; drawRadar(); });
+    nd.addEventListener('mouseleave', () => { radHover = null; drawRadar(); });
+  });
+}
+
+/* ---------- controls ---------- */
+document.querySelectorAll('button[data-w]').forEach(b => b.addEventListener('click', () => { win = b.dataset.w; document.querySelectorAll('button[data-w]').forEach(x => x.setAttribute('aria-pressed', x===b)); refresh(); }));
+document.querySelectorAll('button[data-v]').forEach(b => b.addEventListener('click', () => { view = b.dataset.v; document.querySelectorAll('button[data-v]').forEach(x => x.setAttribute('aria-pressed', x===b)); if (data) drawMain(); }));
+$('#pair').addEventListener('change', e => { pair = e.target.value; hidden = {}; refresh(); });
+$('#moreBtn').addEventListener('click', e => { e.stopPropagation(); const m = $('#menu'); m.dataset.open = m.dataset.open === '1' ? '0' : '1'; });
+document.addEventListener('click', e => { if (!$('#more').contains(e.target)) $('#menu').dataset.open = '0'; });
+$('#mCsv').addEventListener('click', () => {
+  if (!data) return;
+  const rows = [['oracle','time_utc','value','gas_usd','feeds_in_tx','optimistic']];
+  for (const o of ORDER) for (const q of data.updates[o]||[]) rows.push([o, new Date(q.t*1000).toISOString(), q.v, q.c, q.n||1, q.op?'yes':'no']);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([rows.map(r=>r.join(',')).join('\n')], {type:'text/csv'}));
+  a.download = `oracle-ledger-${pair}-${win}.csv`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  $('#menu').dataset.open = '0';
+});
+$('#mRefresh').addEventListener('click', () => { $('#menu').dataset.open = '0'; refresh(); });
+$('#mCopy').addEventListener('click', () => {
+  const b = $('#mCopy');
+  if (navigator.clipboard) navigator.clipboard.writeText(location.origin + location.pathname + '?pair=' + pair).catch(()=>{});
+  b.textContent = 'Link copied';
+  setTimeout(() => { b.textContent = 'Copy link'; $('#menu').dataset.open = '0'; }, 1400);
+});
+let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (data){ drawMain(); drawCadence(); } }, 120); });
+setTimeout(() => { mounted = true; }, 1200);
 loadPairs().then(refresh); setInterval(refresh, 30000);
 </script>
 </body>
