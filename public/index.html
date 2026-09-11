@@ -417,7 +417,13 @@ function drawCadence(){
     const up = upper.map((v,i) => ({x:xs(i), y:ys(v)})), lo = lower.map((v,i) => ({x:xs(i), y:ys(v)}));
     const line = linePath(up, CONFIG.smooth), back = linePath(lo.slice().reverse(), CONFIG.smooth).replace(/^M/,'L');
     svg.appendChild(NS('path',{d:line+back+'Z', fill:'url(#cg-'+o+')', stroke:'none'}));
-    svg.appendChild(NS('path',{d:line, fill:'none', stroke:COLORS[o], 'stroke-width':1.2, 'stroke-linejoin':'round'}));
+    /* Stacked: a layer's top line sits on the running total. Where the layer has no writes it would
+       lie on top of the layer below and hide it, so its line is drawn only where it has thickness. */
+    const cs = counts[k];
+    let stroke = '';
+    if (CONFIG.smooth) stroke = cs.some(c => c > 0) ? line : '';
+    else { let open = false; for (let i=1;i<nb;i++){ if (cs[i] > 0 || cs[i-1] > 0){ stroke += (open ? '' : 'M' + up[i-1].x.toFixed(1) + ' ' + up[i-1].y.toFixed(1)) + 'L' + up[i].x.toFixed(1) + ' ' + up[i].y.toFixed(1); open = true; } else open = false; } }
+    if (stroke) svg.appendChild(NS('path',{d:stroke, fill:'none', stroke:COLORS[o], 'stroke-width':1.2, 'stroke-linejoin':'round', 'data-o':o}));
     cadCounts.tops.push(upper.slice());
     for (let i=0;i<nb;i++) lower[i] = upper[i];
   });
@@ -429,7 +435,7 @@ $('#cadSvg').addEventListener('mousemove', (e) => {
   svg.querySelectorAll('.cursor').forEach(n => n.remove());
   const cur = NS('g',{class:'cursor'});
   cur.appendChild(NS('line',{x1:g.xs(i).toFixed(1),x2:g.xs(i).toFixed(1),y1:g.T,y2:(g.T+g.PH).toFixed(1),stroke:'#3a414c','stroke-width':1}));
-  cadCounts.vis.forEach((o,k) => cur.appendChild(NS('circle',{cx:g.xs(i).toFixed(1),cy:g.ys(cadCounts.tops[k][i]).toFixed(1),r:3.5,fill:'#12151a',stroke:COLORS[o],'stroke-width':2})));
+  cadCounts.vis.forEach((o,k) => { if (cadCounts.counts[k][i] > 0) cur.appendChild(NS('circle',{cx:g.xs(i).toFixed(1),cy:g.ys(cadCounts.tops[k][i]).toFixed(1),r:3.5,fill:'#12151a',stroke:COLORS[o],'stroke-width':2})); });
   svg.appendChild(cur);
   const t = g.t0 + i*g.step, t2 = t + g.step;
   const lab = win === '24h' ? `${hourLabel(t)} to ${hourLabel(t2)} UTC` : `${dayLabel(t)} ${hourLabel(t)} to ${dayLabel(t2)} ${hourLabel(t2)} UTC`;
