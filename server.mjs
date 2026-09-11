@@ -102,12 +102,19 @@ createServer((req, res) => {
   const pair = url.searchParams.get('pair') || 'ETH';
   if (url.pathname === '/api/health') return json(res, { ok: true, chain: CHAIN.name, source: state.source, backfill: state.backfill, lastBlock: state.lastBlock, lastPoll: state.lastPoll, ethUsd: state.ethUsd, pairs: Object.keys(PAIRS), historyDays: HISTORY_DAYS });
   if (url.pathname === '/api/pairs') return json(res, { pairs: Object.entries(PAIRS).map(([id, c]) => ({ id, label: c.label, oracles: oraclesFor(id) })), oracles: ORACLES, costRule: COST_RULE });
-  if (!PAIRS[pair]) return json(res, { error: 'unknown pair' }, 404);
+  if ((url.pathname === '/api/updates' || url.pathname === '/api/stats') && !PAIRS[pair]) return json(res, { error: 'unknown pair' }, 404);
   if (url.pathname === '/api/updates') {
-    const win = WINDOWS[url.searchParams.get('window')] || WINDOWS['30d'];
-    const from = Math.floor(Date.now() / 1000) - win;
-    const out = {}; for (const o of ORACLES) out[o] = state.pairs[pair][o].filter((u) => u.t >= from).map((u) => ({ t: u.t, v: u.value, c: u.costUsd, tx: u.transactionHash, b: u.blockNumber, n: u.feedsInTx, op: u.optimistic || undefined }));
-    return json(res, { pair, oracles: oraclesFor(pair), window: url.searchParams.get('window') || '30d', ethUsd: state.ethUsd, updates: out });
+    const winKey = url.searchParams.get('window') || '30d';
+    if (!WINDOWS[winKey]) return json(res, { error: 'unknown window' }, 400);
+    const from = Math.floor(Date.now() / 1000) - WINDOWS[winKey];
+    const out = {}, prior = {};
+    for (const o of ORACLES) {
+      const series = state.pairs[pair][o];
+      let last = null; for (const u of series) if (u.t < from && (!last || u.t >= last.t)) last = u;
+      prior[o] = last ? last.value : null; // each oracle's last value before the window, so "vs median" starts with a full median
+      out[o] = series.filter((u) => u.t >= from).map((u) => ({ t: u.t, v: u.value, c: u.costUsd, tx: u.transactionHash, b: u.blockNumber, n: u.feedsInTx, op: u.optimistic || undefined }));
+    }
+    return json(res, { pair, oracles: oraclesFor(pair), window: winKey, ethUsd: state.ethUsd, prior, updates: out });
   }
   if (url.pathname === '/api/stats') {
     const out = {}; for (const [w, secs] of Object.entries(WINDOWS)) { out[w] = {}; for (const o of ORACLES) out[w][o] = statsFor(state.pairs[pair][o], secs); }

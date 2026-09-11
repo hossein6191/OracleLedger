@@ -168,7 +168,9 @@ const COLORS = { chainlink:'#3b82f6', chronicle:'#22c55e', redstone:'#e11d48' };
 const NAMES = { chainlink:'Chainlink', chronicle:'Chronicle', redstone:'RedStone' };
 const ORDER = ['chainlink','chronicle','redstone'];
 const SECS = { '24h':86400, '7d':604800, '30d':2592000 };
-let pair = new URLSearchParams(location.search).get('pair') || 'ETH', win = '30d', view = 'price';
+const qs0 = new URLSearchParams(location.search);
+let pair = qs0.get('pair') || 'ETH', win = ['24h','7d','30d'].includes(qs0.get('window')) ? qs0.get('window') : '30d', view = qs0.get('view') === 'spread' ? 'spread' : 'price';
+const linkQS = () => `?pair=${pair}&window=${win}${view==='spread'?'&view=spread':''}`;
 let data = null, stats = null, rule = {}, hidden = {}, mainPts = [], cadGeo = null, cadCounts = null, mounted = false;
 
 const $ = (s) => document.querySelector(s);
@@ -177,7 +179,7 @@ const NS = (n, a) => { const e = document.createElementNS(SVGNS, n); for (const 
 const fmtP = (v) => v >= 1000 ? v.toLocaleString('en-US',{maximumFractionDigits:2}) : v.toLocaleString('en-US',{maximumFractionDigits:4});
 const fmtU = (v) => v == null ? 'n/a' : '$' + v.toFixed(2);
 const fmtUsd = (v) => '$' + v.toLocaleString('en-US',{maximumFractionDigits: v >= 100 ? 0 : 2});
-const age = (s) => s == null ? 'n/a' : s < 90 ? s + 's' : s < 5400 ? Math.round(s/60) + 'm' : s < 172800 ? (s/3600).toFixed(1) + 'h' : (s/86400).toFixed(1) + 'd';
+const age = (s) => s == null ? 'n/a' : s < 90 ? s + 's' : s < 5400 ? Math.floor(s/60) + 'm' : s < 172800 ? (s/3600).toFixed(1) + 'h' : (s/86400).toFixed(1) + 'd';
 const ts = (t) => new Date(t*1000).toISOString().slice(5,16).replace('T',' ') + ' UTC';
 const dayLabel = (t) => new Date(t*1000).toISOString().slice(5,10).replace('-','/');
 const hourLabel = (t) => new Date(t*1000).toISOString().slice(11,16);
@@ -198,15 +200,15 @@ function label(layer, x, y, text, anchor){
 /* "vs median": for every write, the median of the oracles' latest values at that moment,
    and the write's distance from it in basis points. Lines that sit on top of each other
    in price terms come apart here. */
-function spreadSeries(updates){
+function spreadSeries(updates, prior){
   const merged = ORDER.flatMap(o => (updates[o]||[]).map(p => ({...p, o}))).sort((a,b)=>a.t-b.t);
-  const last = {}; const out = Object.fromEntries(ORDER.map(o=>[o,[]]));
+  const last = Object.fromEntries(Object.entries(prior || {}).filter(([, v]) => v != null)); const out = Object.fromEntries(ORDER.map(o=>[o,[]]));
   for (const p of merged){
     last[p.o] = p.v;
     const vals = ORDER.map(o=>last[o]).filter(v=>v!=null).sort((a,b)=>a-b);
     if (vals.length < 2) continue;
     const med = vals.length%2 ? vals[vals.length>>1] : (vals[vals.length/2-1]+vals[vals.length/2])/2;
-    out[p.o].push({...p, price:p.v, v:(p.v-med)/med*10000});
+    out[p.o].push({...p, price:p.v, v:(p.v-med)/med*10000, med, snap:{...last}});
   }
   return out;
 }
@@ -227,20 +229,27 @@ const linePath = (pts, smooth) => !pts.length ? '' : (smooth && pts.length > 2 ?
 async function loadPairs(){
   const p = await (await fetch('/api/pairs')).json();
   rule = p.costRule;
+  if (!p.pairs.some(x => x.id === pair)) pair = p.pairs[0].id;
   $('#pair').innerHTML = p.pairs.map(x => `<option value="${x.id}" ${x.id===pair?'selected':''}>${x.label}</option>`).join('');
 }
 async function refresh(){
-  const [u, s, h] = await Promise.all([
-    fetch(`/api/updates?pair=${pair}&window=${win}`).then(r=>r.json()),
-    fetch(`/api/stats?pair=${pair}`).then(r=>r.json()),
-    fetch('/api/health').then(r=>r.json()),
-  ]);
+  const p = pair, w = win;
+  let u, s, h;
+  try {
+    [u, s, h] = await Promise.all([
+      fetch(`/api/updates?pair=${p}&window=${w}`).then(r=>r.json()),
+      fetch(`/api/stats?pair=${p}`).then(r=>r.json()),
+      fetch('/api/health').then(r=>r.json()),
+    ]);
+  } catch (e) { $('#status').innerHTML = `<span class="warn">refresh failed, retrying in 30 s</span>`; return; }
+  if (p !== pair || w !== win) return; /* a newer request owns the screen */
+  if (!u || u.error || !u.updates || !s || !s.stats){ $('#status').innerHTML = `<span class="warn">${(u && u.error) || (s && s.error) || 'no data'}</span>`; return; }
   data = u; stats = s;
   const bf = h.backfill || {};
   $('#status').innerHTML = bf.status === 'running' ? `<span class="warn">backfilling ${h.historyDays} days via ${h.source}…</span>`
-    : `updated ${new Date().toLocaleTimeString('en-GB')} · block ${h.lastBlock} · ETH $${(h.ethUsd||0).toFixed(0)}`;
+    : `updated ${new Date().toISOString().slice(11,19)} UTC · block ${h.lastBlock} · ETH $${(h.ethUsd||0).toFixed(0)}`;
   renderAll();
-  history.replaceState(null,'',`?pair=${pair}`);
+  history.replaceState(null,'',linkQS());
 }
 function renderAll(){ renderLegend(); drawMain(); renderStats(); drawCadence(); drawDonut(); drawRadar(); }
 
@@ -253,10 +262,10 @@ function drawMain(){
   svg.setAttribute('height', H);
   const W = Math.round(svg.getBoundingClientRect().width) || 800;
   const vis = visible();
-  const series = view === 'spread' ? spreadSeries(data.updates) : data.updates;
+  const series = view === 'spread' ? spreadSeries(data.updates, data.prior) : data.updates;
   const all = vis.flatMap(o => (series[o]||[]).map(p => ({...p,o})));
   $('#count').textContent = all.length ? `${all.length} updates in view` : '';
-  if (!all.length){ label(lyr, 16, 20, 'no updates in this window yet', 'start'); return; }
+  if (!all.length){ label(lyr, 16, 20, vis.length ? 'no updates in this window yet' : 'all oracles hidden, click a name in the legend to show it', 'start'); return; }
 
   const now = Date.now()/1000, t1 = now, t0 = now - SECS[win];
   let lo = Math.min(...all.map(p=>p.v)), hi = Math.max(...all.map(p=>p.v));
@@ -313,12 +322,17 @@ $('#chart').addEventListener('mousemove', (e) => {
   cur.appendChild(NS('circle',{cx:best.x.toFixed(1),cy:best.y.toFixed(1),r:5,fill:'#12151a',stroke:COLORS[best.o],'stroke-width':2}));
   svg.appendChild(cur);
 
-  const vis = visible(), tStar = best.p.t, latest = {};
-  for (const o of vis){ const arr = data.updates[o] || []; let v = null; for (let i=arr.length-1;i>=0;i--) if (arr[i].t <= tStar){ v = arr[i].v; break; } latest[o] = v; }
-  const vals = Object.values(latest).filter(v=>v!=null).sort((a,b)=>a-b);
-  const med = vals.length ? (vals.length%2 ? vals[vals.length>>1] : (vals[vals.length/2-1]+vals[vals.length/2])/2) : null;
+  const vis = visible(), tStar = best.p.t; let latest, med;
+  if (view === 'spread'){ latest = { ...best.p.snap }; med = best.p.med; }
+  else {
+    latest = {};
+    for (const o of trackedSet()){ const arr = data.updates[o] || []; let v = null; for (let i=arr.length-1;i>=0;i--) if (arr[i].t <= tStar){ v = arr[i].v; break; } latest[o] = v; }
+    latest[best.o] = best.p.v;
+    const vals = Object.values(latest).filter(v=>v!=null).sort((a,b)=>a-b);
+    med = vals.length >= 2 ? (vals.length%2 ? vals[vals.length>>1] : (vals[vals.length/2-1]+vals[vals.length/2])/2) : null;
+  }
   const rows = vis.map(o => {
-    const v = latest[o], bps = (v != null && med && vals.length >= 2) ? (v-med)/med*1e4 : null, hot = bps != null && Math.abs(bps) >= 10;
+    const v = latest[o], bps = (v != null && med) ? (v-med)/med*1e4 : null, hot = bps != null && Math.abs(bps) >= 10;
     return `<div class="r ${o===best.o?'on':''}"><span class="ring" style="${ring(COLORS[o],12)}"></span><span class="nm">${NAMES[o]}</span><span class="v">${v==null?'n/a':fmtP(v)}</span><span class="b ${hot?'hot':''}" style="${bps==null?'visibility:hidden':''}">${bps==null?'':(bps>0?'+':'')+bps.toFixed(1)+' bps'}</span></div>`;
   }).join('');
   const tip = $('#tip');
@@ -356,7 +370,7 @@ function renderStats(){
       <div class="row"><span>Most expensive</span><span>${fmtU(x.costMaxUsd)}</span></div>
       <div class="row"><span>Latest on-chain<small>${x.lastAt?ts(x.lastAt):''}</small></span><span>${x.lastValue!=null?fmtP(x.lastValue):'n/a'} <span style="color:#8a93a0">· ${age(x.ageSeconds)} old</span></span></div>
     </div>`; }).join('');
-  $('#foot').innerHTML = `Every point is one on-chain write, read from the oracle contracts' own events on Ethereum. Nothing sampled, nothing estimated. Gas is priced at the current Chainlink ETH/USD ($${(stats.ethUsd||0).toFixed(0)}). RedStone writes several feeds per transaction, so its gas is split evenly across the feeds in that transaction; Chainlink and Chronicle write one feed per transaction. Chronicle points marked <span style="color:#f59e0b">optimistic</span> are OpPoked writes that finalise later. Max deviation is the largest move between two consecutive updates of the same oracle. In the <b>vs median</b> view each write is shown as its distance from the median of the oracles' latest values at that moment${(stats.oracles||[]).length===2?'; with two oracles that median is simply their midpoint, so the two sit at half the gap from each other, and a swing is not one of them being wrong':''}. Independent, not affiliated with any oracle.`;
+  $('#foot').innerHTML = `Every point is one on-chain write, read from the oracle contracts' own events on Ethereum. Nothing sampled, nothing estimated. Gas is priced in USD at the Chainlink ETH/USD rate at the time each update was recorded (now $${(stats.ethUsd||0).toFixed(0)}). RedStone writes several feeds per transaction, so its gas is split evenly across the feeds in that transaction; Chainlink and Chronicle write one feed per transaction. Chronicle points marked <span style="color:#f59e0b">optimistic</span> are OpPoked writes that finalise later. Max deviation is the largest move between two consecutive updates of the same oracle. In the <b>vs median</b> view each write is shown as its distance from the median of the oracles' latest values at that moment${(stats.oracles||[]).length===2?'; with two oracles that median is simply their midpoint, so the two sit at half the gap from each other, and a swing is not one of them being wrong':''}. Independent, not affiliated with any oracle.`;
 }
 
 /* ---------- update cadence (stacked area) ---------- */
@@ -370,7 +384,7 @@ function drawCadence(){
   $('#cadSub').textContent = `writes per ${step===3600?'hour':step===21600?'6 hours':'day'} · stacked · ${win}`;
   const counts = vis.map(o => { const a = new Array(nb).fill(0); for (const q of data.updates[o]||[]){ const i = Math.min(nb-1, Math.floor((q.t-t0)/step)); if (i >= 0) a[i]++; } return a; });
   const totals = new Array(nb).fill(0); counts.forEach(a => a.forEach((c,i) => totals[i] += c));
-  const maxT = Math.max(1, ...totals), niceMax = maxT <= 4 ? maxT : Math.ceil(maxT/4)*4;
+  const maxT = Math.max(1, ...totals), niceMax = maxT <= 4 ? (maxT % 2 ? maxT + 1 : maxT) : Math.ceil(maxT/4)*4;
   const L = 30, R = 8, T = 10, B = 22, PW = W - L - R, PH = H - T - B;
   const xs = i => L + (nb === 1 ? PW/2 : (i/(nb-1))*PW), ys = v => T + (1 - v/niceMax)*PH;
   cadGeo = { nb, L, PW, T, PH, step, t0, xs, ys, W }; cadCounts = { counts, totals, vis };
@@ -411,7 +425,7 @@ $('#cadSvg').addEventListener('mousemove', (e) => {
   cadCounts.vis.forEach((o,k) => cur.appendChild(NS('circle',{cx:g.xs(i).toFixed(1),cy:g.ys(cadCounts.tops[k][i]).toFixed(1),r:3.5,fill:'#12151a',stroke:COLORS[o],'stroke-width':2})));
   svg.appendChild(cur);
   const t = g.t0 + i*g.step, t2 = t + g.step;
-  const lab = win === '24h' ? `${hourLabel(t)} to ${hourLabel(t2)} UTC` : win === '7d' ? `${dayLabel(t)} ${hourLabel(t)} UTC` : dayLabel(t);
+  const lab = win === '24h' ? `${hourLabel(t)} to ${hourLabel(t2)} UTC` : `${dayLabel(t)} ${hourLabel(t)} to ${dayLabel(t2)} ${hourLabel(t2)} UTC`;
   const tip = $('#cadTip');
   tip.innerHTML = `<div class="when">${lab}</div><div style="display:grid;gap:4px">` +
     cadCounts.vis.map((o,k) => `<div class="r"><span class="sq" style="background:${COLORS[o]}"></span><span class="nm" style="min-width:0">${NAMES[o]}</span><span class="v">${cadCounts.counts[k][i]}</span></div>`).join('') +
@@ -425,43 +439,54 @@ $('#cadSvg').addEventListener('mousemove', (e) => {
 $('#cadSvg').addEventListener('mouseleave', () => { $('#cadTip').style.display = 'none'; $('#cadSvg').querySelectorAll('.cursor').forEach(n => n.remove()); });
 
 /* ---------- gas share (donut) ---------- */
-let donHover = null;
+let donHover = null, donItems = [], donTotal = 0, donPct = [];
 function drawDonut(){
   const svg = $('#donSvg'); svg.innerHTML = '';
   if (!stats) return;
   const s = stats.stats[win], vis = visible();
   const items = vis.map(o => ({ o, name:NAMES[o], color:COLORS[o], v: s[o] ? s[o].costTotalUsd : 0 }));
   const total = items.reduce((a,x)=>a+x.v,0), r = 77, circ = 2*Math.PI*r, gap = items.filter(x=>x.v>0).length > 1 ? 3 : 0;
+  donItems = items; donTotal = total;
+  /* largest-remainder rounding so the shares add up to 100 */
+  const raw = items.map(x => total ? x.v/total*100 : 0); donPct = raw.map(Math.floor);
+  { let rem = total ? 100 - donPct.reduce((a,b)=>a+b,0) : 0; raw.map((r,i)=>[r-donPct[i],i]).sort((a,b)=>b[0]-a[0]).slice(0, rem).forEach(([,i]) => donPct[i]++); }
   $('#donSub').textContent = `share of total gas · ${win}`;
   svg.appendChild(NS('circle',{cx:88,cy:88,r,fill:'none',stroke:'#1a1e25','stroke-width':22}));
   const g = NS('g',{transform:'rotate(-90 88 88)'});
   let acc = 0;
   items.forEach((x,i) => {
     const frac = total ? x.v/total : 0, len = Math.max(0, frac*circ - gap);
-    const c = NS('circle',{cx:88,cy:88,r,fill:'none',stroke:x.color,'stroke-width':22,'stroke-dashoffset':(-acc).toFixed(2),
+    const c = NS('circle',{cx:88,cy:88,r,fill:'none',stroke:x.color,'stroke-width':22,'stroke-dashoffset':(-acc).toFixed(2),'data-o':x.o,
       'stroke-dasharray': (mounted || !CONFIG.animate ? len.toFixed(2) : 0) + ' ' + (circ - (mounted || !CONFIG.animate ? len : 0)).toFixed(2)});
     c.style.transition = CONFIG.animate ? `stroke-dasharray .9s cubic-bezier(.2,.7,.2,1) ${i*.08}s, opacity .2s` : 'none';
     c.style.cursor = 'pointer';
-    c.style.opacity = donHover && donHover !== x.o ? .3 : 1;
-    c.addEventListener('mouseenter', () => { donHover = x.o; drawDonut(); });
-    c.addEventListener('mouseleave', () => { donHover = null; drawDonut(); });
+    c.addEventListener('mouseenter', () => setDonHover(x.o));
+    c.addEventListener('mouseleave', () => setDonHover(null));
     if (!mounted && CONFIG.animate) requestAnimationFrame(() => requestAnimationFrame(() => c.setAttribute('stroke-dasharray', len.toFixed(2) + ' ' + (circ-len).toFixed(2))));
     acc += frac*circ;
     g.appendChild(c);
   });
   svg.appendChild(g);
-  const act = items.find(x => x.o === donHover);
-  $('#donBig').textContent = fmtUsd(act ? act.v : total);
-  $('#donSmall').textContent = act ? `${act.name} · ${total?Math.round(act.v/total*100):0}%` : `gas · ${win}`;
-  $('#donKeys').innerHTML = items.map(x => `<div class="k ${donHover===x.o?'on':''}" data-o="${x.o}"><span class="ring" style="${ring(x.color,12)}"></span><span>${x.name}</span><span class="v">${fmtUsd(x.v)}</span><span class="p">${total?Math.round(x.v/total*100):0}%</span></div>`).join('');
+  $('#donKeys').innerHTML = items.map((x,i) => `<div class="k" data-o="${x.o}"><span class="ring" style="${ring(x.color,12)}"></span><span>${x.name}</span><span class="v">${fmtUsd(x.v)}</span><span class="p">${donPct[i]}%</span></div>`).join('');
   $('#donKeys').querySelectorAll('.k').forEach(n => {
-    n.addEventListener('mouseenter', () => { donHover = n.dataset.o; drawDonut(); });
-    n.addEventListener('mouseleave', () => { donHover = null; drawDonut(); });
+    n.addEventListener('mouseenter', () => setDonHover(n.dataset.o));
+    n.addEventListener('mouseleave', () => setDonHover(null));
   });
+  setDonHover(vis.includes(donHover) ? donHover : null);
+}
+/* Hover only restyles what is already drawn; redrawing the SVG under the pointer would
+   replace the element being hovered and fire enter/leave again on every mouse move. */
+function setDonHover(o){
+  donHover = o;
+  $('#donSvg').querySelectorAll('circle[data-o]').forEach(c => { c.style.opacity = o && o !== c.dataset.o ? .3 : 1; });
+  const act = donItems.find(x => x.o === o);
+  $('#donBig').textContent = fmtUsd(act ? act.v : donTotal);
+  $('#donSmall').textContent = act ? `${act.name} · ${donPct[donItems.indexOf(act)]}%` : `gas · ${win}`;
+  $('#donKeys').querySelectorAll('.k').forEach(k => k.classList.toggle('on', k.dataset.o === o));
 }
 
 /* ---------- profile (radar) ---------- */
-let radHover = null;
+let radHover = null, radNotes = {};
 function drawRadar(){
   const svg = $('#radSvg'), lyr = $('#radLabels');
   svg.innerHTML = ''; lyr.innerHTML = '';
@@ -481,27 +506,40 @@ function drawRadar(){
   const pt = (i,f) => ({ x: cx + R*f*Math.cos(ang(i)), y: cy + R*f*Math.sin(ang(i)) });
   [.25,.5,.75,1].forEach(f => svg.appendChild(NS('polygon',{points:metrics.map((_,i)=>{const p=pt(i,f);return p.x.toFixed(1)+','+p.y.toFixed(1);}).join(' '),fill:'none',stroke:'#232830','stroke-width':1})));
   metrics.forEach((_,i) => { const p = pt(i,1); svg.appendChild(NS('line',{x1:cx,y1:cy,x2:p.x.toFixed(1),y2:p.y.toFixed(1),stroke:'#232830','stroke-width':1})); });
-  vis.forEach(o => {
+  /* Largest polygon goes in first so it sits at the bottom: a small polygon drawn under a
+     big one can never be hovered, its area belongs to the big one's fill. */
+  const shapes = vis.map(o => {
     const pts = metrics.map((m,i) => pt(i, maxes[i] ? (m.get(s[o])||0)/maxes[i] : 0));
-    const g = NS('g',{});
-    g.style.opacity = radHover && radHover !== o ? .18 : 1; g.style.transition = 'opacity .2s'; g.style.cursor = 'pointer';
+    let a = 0; for (let i=0;i<n;i++){ const p = pts[i], q = pts[(i+1)%n]; a += p.x*q.y - q.x*p.y; }
+    return { o, pts, area: Math.abs(a) };
+  }).sort((a,b) => b.area - a.area);
+  for (const {o, pts} of shapes){
+    const g = NS('g',{'data-o':o});
+    g.style.transition = 'opacity .2s'; g.style.cursor = 'pointer';
     g.appendChild(NS('polygon',{points:pts.map(p=>p.x.toFixed(1)+','+p.y.toFixed(1)).join(' '),fill:COLORS[o],'fill-opacity':.18,stroke:COLORS[o],'stroke-width':1.5,'stroke-linejoin':'round'}));
     pts.forEach(p => g.appendChild(NS('circle',{cx:p.x.toFixed(1),cy:p.y.toFixed(1),r:3,fill:COLORS[o]})));
-    g.addEventListener('mouseenter', () => { radHover = o; drawRadar(); });
-    g.addEventListener('mouseleave', () => { radHover = null; drawRadar(); });
+    g.addEventListener('mouseenter', () => setRadHover(o));
+    g.addEventListener('mouseleave', () => setRadHover(null));
     svg.appendChild(g);
-  });
+  }
   metrics.forEach((m,i) => { const p = pt(i,1.2), c = Math.cos(ang(i)); label(lyr, p.x, p.y, m.label, Math.abs(c) < .2 ? 'middle' : c > 0 ? 'start' : 'end'); });
-  $('#radKeys').innerHTML = vis.map(o => `<div class="k ${radHover===o?'on':''}" data-o="${o}"><span class="ring" style="${ring(COLORS[o],12)}"></span><span>${NAMES[o]}</span><span class="note">${radHover===o?metrics.map(m=>`${m.label} ${m.fmt(m.get(s[o]))}`).join(' · '):''}</span></div>`).join('');
+  radNotes = Object.fromEntries(vis.map(o => [o, metrics.map(m => `${m.label} ${m.fmt(m.get(s[o]))}`).join(' · ')]));
+  $('#radKeys').innerHTML = vis.map(o => `<div class="k" data-o="${o}"><span class="ring" style="${ring(COLORS[o],12)}"></span><span>${NAMES[o]}</span><span class="note"></span></div>`).join('');
   $('#radKeys').querySelectorAll('.k').forEach(nd => {
-    nd.addEventListener('mouseenter', () => { radHover = nd.dataset.o; drawRadar(); });
-    nd.addEventListener('mouseleave', () => { radHover = null; drawRadar(); });
+    nd.addEventListener('mouseenter', () => setRadHover(nd.dataset.o));
+    nd.addEventListener('mouseleave', () => setRadHover(null));
   });
+  setRadHover(vis.includes(radHover) ? radHover : null);
+}
+function setRadHover(o){
+  radHover = o;
+  $('#radSvg').querySelectorAll('g[data-o]').forEach(g => { g.style.opacity = o && o !== g.dataset.o ? .18 : 1; });
+  $('#radKeys').querySelectorAll('.k').forEach(k => { const on = k.dataset.o === o; k.classList.toggle('on', on); k.querySelector('.note').textContent = on ? radNotes[o] : ''; });
 }
 
 /* ---------- controls ---------- */
 document.querySelectorAll('button[data-w]').forEach(b => b.addEventListener('click', () => { win = b.dataset.w; document.querySelectorAll('button[data-w]').forEach(x => x.setAttribute('aria-pressed', x===b)); refresh(); }));
-document.querySelectorAll('button[data-v]').forEach(b => b.addEventListener('click', () => { view = b.dataset.v; document.querySelectorAll('button[data-v]').forEach(x => x.setAttribute('aria-pressed', x===b)); if (data) drawMain(); }));
+document.querySelectorAll('button[data-v]').forEach(b => b.addEventListener('click', () => { view = b.dataset.v; document.querySelectorAll('button[data-v]').forEach(x => x.setAttribute('aria-pressed', x===b)); if (data) drawMain(); history.replaceState(null,'',linkQS()); }));
 $('#pair').addEventListener('change', e => { pair = e.target.value; hidden = {}; refresh(); });
 $('#moreBtn').addEventListener('click', e => { e.stopPropagation(); const m = $('#menu'); m.dataset.open = m.dataset.open === '1' ? '0' : '1'; });
 document.addEventListener('click', e => { if (!$('#more').contains(e.target)) $('#menu').dataset.open = '0'; });
@@ -518,12 +556,14 @@ $('#mCsv').addEventListener('click', () => {
 $('#mRefresh').addEventListener('click', () => { $('#menu').dataset.open = '0'; refresh(); });
 $('#mCopy').addEventListener('click', () => {
   const b = $('#mCopy');
-  if (navigator.clipboard) navigator.clipboard.writeText(location.origin + location.pathname + '?pair=' + pair).catch(()=>{});
+  if (navigator.clipboard) navigator.clipboard.writeText(location.origin + location.pathname + linkQS()).catch(()=>{});
   b.textContent = 'Link copied';
   setTimeout(() => { b.textContent = 'Copy link'; $('#menu').dataset.open = '0'; }, 1400);
 });
 let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (data){ drawMain(); drawCadence(); } }, 120); });
 setTimeout(() => { mounted = true; }, 1200);
+document.querySelectorAll('button[data-w]').forEach(x => x.setAttribute('aria-pressed', x.dataset.w === win));
+document.querySelectorAll('button[data-v]').forEach(x => x.setAttribute('aria-pressed', x.dataset.v === view));
 loadPairs().then(refresh); setInterval(refresh, 30000);
 </script>
 </body>
