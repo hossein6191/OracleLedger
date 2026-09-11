@@ -2,9 +2,9 @@ import { createServer } from 'node:http';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { resolve, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PAIRS, ORACLES, REDSTONE_ADAPTER, COST_RULE, CHAIN, oraclesFor } from './src/config.mjs';
-import { TOPIC, feedIdBytes32, decodeChainlink, decodeRedstone, decodeChronicle } from './src/decode.mjs';
-import { blockNumber, aggregatorOf, ethUsd, fetchLogs, rpcLogs, receiptsFor, hasHyperSync } from './src/sources.mjs';
+import { PAIRS, ORACLES, REDSTONE_ADAPTER, COST_RULE, CHAIN, oraclesFor, PYTH } from './src/config.mjs';
+import { TOPIC, feedIdBytes32, decodeChainlink, decodeRedstone, decodeChronicle, decodePyth, PYTH_GET_PRICE_UNSAFE, decodePythPrice } from './src/decode.mjs';
+import { blockNumber, aggregatorOf, ethUsd, fetchLogs, rpcLogs, receiptsFor, hasHyperSync, ethCall } from './src/sources.mjs';
 import { state, addUpdates, save, load } from './src/store.mjs';
 import { statsFor, WINDOWS } from './src/stats.mjs';
 
@@ -19,6 +19,9 @@ const PORT = Number(process.env.PORT || 3000);
 const aggregators = {};       // pair -> chainlink aggregator address
 const feedIdToPair = Object.fromEntries(Object.entries(PAIRS).map(([p, c]) => [feedIdBytes32(c.redstoneFeedId), p]));
 const chronicleToPair = Object.fromEntries(Object.entries(PAIRS).filter(([, c]) => c.chronicle).map(([p, c]) => [c.chronicle.toLowerCase(), p]));
+const pythToPair = Object.fromEntries(Object.entries(PAIRS).filter(([, c]) => c.pyth).map(([p, c]) => [c.pyth.toLowerCase(), p]));
+// Which pairs and oracles the snapshot covers; when this changes, backfill the whole horizon once.
+const COVERAGE = JSON.stringify(Object.keys(PAIRS).map((p) => [p, oraclesFor(p)]));
 
 async function resolveAggregators() {
   for (const [p, c] of Object.entries(PAIRS)) aggregators[p] = await aggregatorOf(c.chainlinkProxy);
@@ -28,23 +31,28 @@ async function resolveAggregators() {
 async function ingest(from, to, useArchive) {
   const get = useArchive ? fetchLogs : rpcLogs;
   const clAddrs = Object.values(aggregators);
-  const [cl, rs, ch] = await Promise.all([
+  const [cl, rs, ch, py] = await Promise.all([
     get(clAddrs, [TOPIC.chainlinkAnswerUpdated], from, to),
     get([REDSTONE_ADAPTER], [TOPIC.redstoneValueUpdate], from, to),
     get(Object.values(PAIRS).map((c) => c.chronicle).filter(Boolean), [TOPIC.chroniclePoked, TOPIC.chronicleOpPoked], from, to),
+    get([PYTH], [TOPIC.pythPriceFeedUpdate], from, to),
   ]);
 
   // RedStone: how many feeds each transaction wrote, before filtering to ours.
   const feedsPerTx = new Map();
   for (const l of rs.logs) feedsPerTx.set(l.transactionHash, (feedsPerTx.get(l.transactionHash) || 0) + 1);
+  // Pyth: same idea, one transaction can push several feeds.
+  const pythPerTx = new Map();
+  for (const l of py.logs) pythPerTx.set(l.transactionHash, (pythPerTx.get(l.transactionHash) || 0) + 1);
 
   const wanted = [];
   for (const l of cl.logs) { const pair = Object.keys(aggregators).find((p) => aggregators[p] === l.address); if (pair) wanted.push({ pair, oracle: 'chainlink', log: l, ...decodeChainlink(l), share: 1 }); }
   for (const l of rs.logs) { const d = decodeRedstone(l); const pair = feedIdToPair[d.feedIdRaw]; if (pair) wanted.push({ pair, oracle: 'redstone', log: l, ...d, share: feedsPerTx.get(l.transactionHash) || 1 }); }
   for (const l of ch.logs) { const d = decodeChronicle(l); const pair = chronicleToPair[l.address]; if (pair && d) wanted.push({ pair, oracle: 'chronicle', log: l, ...d, share: 1 }); }
+  for (const l of py.logs) { const d = decodePyth(l); const pair = pythToPair[d.feedIdRaw]; if (pair) wanted.push({ pair, oracle: 'pyth', log: l, ...d, share: pythPerTx.get(l.transactionHash) || 1 }); }
 
   // Gas: from HyperSync when it came back with the logs, otherwise from receipts.
-  const gas = new Map([...cl.txs, ...rs.txs, ...ch.txs]);
+  const gas = new Map([...cl.txs, ...rs.txs, ...ch.txs, ...py.txs]);
   const missing = [...new Set(wanted.map((w) => w.log.transactionHash).filter((h) => !gas.has(h)))];
   for (let i = 0; i < missing.length; i += 200) for (const [h, g] of await receiptsFor(missing.slice(i, i + 200))) gas.set(h, g);
 
@@ -63,18 +71,24 @@ async function ingest(from, to, useArchive) {
   return added;
 }
 
+// Pyth's stored price per pair, read from the contract: shown when no Pyth write is in the history.
+async function readPythLatest() {
+  for (const [p, c] of Object.entries(PAIRS)) if (c.pyth) state.pythLatest[p] = decodePythPrice(await ethCall(PYTH, PYTH_GET_PRICE_UNSAFE + c.pyth.slice(2)));
+}
+
 async function backfill() {
   const latest = await blockNumber();
   const horizon = latest - Math.ceil(HISTORY_DAYS * 86400 / CHAIN.blockSeconds);
-  // Resume from the snapshot — unless some tracked series is still empty (a pair
-  // added since the snapshot was taken), in which case take the whole horizon.
-  const anyEmpty = Object.entries(state.pairs).some(([p, byO]) => oraclesFor(p).some((o) => !byO[o]?.length));
-  const from = anyEmpty ? horizon : Math.max(horizon, state.lastBlock ? state.lastBlock + 1 : 0);
+  // Resume from the snapshot, unless the tracked pairs or oracles changed since it was
+  // taken. (An empty series is not a reason: Pyth can go a month without a write.)
+  const full = state.coverage !== COVERAGE;
+  const from = full ? horizon : Math.max(horizon, state.lastBlock ? state.lastBlock + 1 : 0);
   state.source = hasHyperSync() ? 'hypersync' : 'rpc';
   state.backfill = { status: 'running', startedAt: Date.now(), finishedAt: 0, from, to: latest };
   console.log(`[backfill] ${state.source}: blocks ${from}..${latest} (${latest - from} blocks, ~${((latest - from) * CHAIN.blockSeconds / 86400).toFixed(1)} days)`);
   const added = await ingest(from, latest, true);
   state.backfill = { ...state.backfill, status: 'done', finishedAt: Date.now(), added };
+  state.coverage = COVERAGE;
   console.log(`[backfill] done: ${added} updates in ${((Date.now() - state.backfill.startedAt) / 1000).toFixed(1)}s`);
   save();
 }
@@ -84,6 +98,7 @@ async function poll() {
   try {
     state.ethUsd = await ethUsd();
     if (++polls % 20 === 0) await resolveAggregators();
+    if (polls % 20 === 1) await readPythLatest().catch((e) => console.warn('[pyth] latest read failed:', e.message));
     const latest = await blockNumber();
     if (latest > state.lastBlock) { const added = await ingest(state.lastBlock + 1, latest, false); if (added) console.log(`[poll] +${added} updates, block ${latest}`); }
     state.lastPoll = Date.now();
@@ -118,6 +133,8 @@ createServer((req, res) => {
   }
   if (url.pathname === '/api/stats') {
     const out = {}; for (const [w, secs] of Object.entries(WINDOWS)) { out[w] = {}; for (const o of ORACLES) out[w][o] = statsFor(state.pairs[pair][o], secs); }
+    const pl = state.pythLatest[pair], nowS = Math.floor(Date.now() / 1000);
+    if (pl) for (const w of Object.keys(out)) if (out[w].pyth.lastValue == null) Object.assign(out[w].pyth, { lastValue: pl.value, lastAt: pl.t, ageSeconds: nowS - pl.t, fromContract: true });
     return json(res, { pair, oracles: oraclesFor(pair), ethUsd: state.ethUsd, costRule: COST_RULE, stats: out });
   }
   if (url.pathname === '/' || url.pathname === '/index.html') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); return res.end(readFileSync(INDEX)); }

@@ -8,7 +8,7 @@ const HISTORY_DAYS = Number(process.env.HISTORY_DAYS || 30);
 
 export const state = {
   pairs: Object.fromEntries(Object.keys(PAIRS).map((p) => [p, Object.fromEntries(ORACLES.map((o) => [o, []]))])),
-  lastBlock: 0, ethUsd: 0, source: 'rpc', backfill: { status: 'starting', startedAt: Date.now(), finishedAt: 0 }, lastPoll: 0,
+  lastBlock: 0, ethUsd: 0, source: 'rpc', backfill: { status: 'starting', startedAt: Date.now(), finishedAt: 0 }, lastPoll: 0, coverage: null, pythLatest: {},
 };
 
 const key = (u) => `${u.transactionHash}:${u.logIndex}`;
@@ -33,7 +33,7 @@ export function load() {
   try {
     const s = JSON.parse(readFileSync(FILE, 'utf8'));
     if (s?.pairs) { for (const p of Object.keys(state.pairs)) for (const o of ORACLES) if (s.pairs[p]?.[o]) state.pairs[p][o] = s.pairs[p][o]; }
-    state.lastBlock = s.lastBlock || 0; state.ethUsd = s.ethUsd || 0;
+    state.lastBlock = s.lastBlock || 0; state.ethUsd = s.ethUsd || 0; state.coverage = s.coverage || null;
     return true;
   } catch { return false; }
 }

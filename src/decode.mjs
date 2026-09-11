@@ -1,4 +1,4 @@
-// Turning raw logs into {value, t}. All three oracles put a timestamp in the
+// Turning raw logs into {value, t}. Every oracle puts a timestamp in the
 // event itself, so no block lookups are needed anywhere.
 import { AbiCoder, id, encodeBytes32String, decodeBytes32String, toBigInt } from 'ethers';
 import { EVENTS } from './config.mjs';
@@ -10,6 +10,7 @@ export const TOPIC = {
   redstoneValueUpdate: id(EVENTS.redstoneValueUpdate),
   chroniclePoked: id(EVENTS.chroniclePoked),
   chronicleOpPoked: id(EVENTS.chronicleOpPoked),
+  pythPriceFeedUpdate: id(EVENTS.pythPriceFeedUpdate),
 };
 
 export const feedIdBytes32 = (name) => encodeBytes32String(name).toLowerCase();
@@ -43,4 +44,16 @@ export function decodeChronicle(log) {
     return { value: Number(pokeData[0]) / 1e18, t: Number(pokeData[1]), optimistic: true };
   }
   return null;
+}
+
+export function decodePyth(log) {
+  const [publishTime, price] = coder.decode(['uint64', 'int64', 'uint64'], log.data);
+  return { value: Number(price) / 1e8, t: Number(publishTime), feedIdRaw: log.topics[1].toLowerCase() };
+}
+
+// Pyth's stored price for a feed, read from the contract itself (not from Pyth's API).
+export const PYTH_GET_PRICE_UNSAFE = id('getPriceUnsafe(bytes32)').slice(0, 10);
+export function decodePythPrice(hex) {
+  const [price, , expo, publishTime] = coder.decode(['int64', 'uint64', 'int32', 'uint256'], hex);
+  return { value: Number(price) * 10 ** Number(expo), t: Number(publishTime) };
 }

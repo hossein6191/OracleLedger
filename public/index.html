@@ -39,7 +39,7 @@
   .menu[data-open="1"] { display:grid; }
   .menu button { text-align:left; background:transparent; border:0; border-radius:6px; padding:7px 10px; font:inherit; font-size:13px; color:var(--ink); cursor:pointer; }
   .menu button:hover { background:var(--hov); }
-  .plot { position:relative; }
+  .plot { position:relative; user-select:none; -webkit-user-select:none; }
   .plot svg { display:block; overflow:visible; cursor:crosshair; }
   .lyr { position:absolute; inset:0; pointer-events:none; }
   .lyr div { position:absolute; font-size:11px; line-height:11px; color:var(--dim); white-space:nowrap; }
@@ -57,7 +57,7 @@
   .tip.sm { min-width:0; width:168px; padding:8px 10px; }
   .tip.sm .r { font-size:12px; padding:0; margin:0; }
   .tip.sm .sq { width:10px; height:10px; border-radius:2px; flex:none; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; margin-top:12px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:12px; margin-top:12px; }
   .card h3 { margin:0 0 10px; font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px; }
   .card h3 i { display:inline-block; width:10px; height:10px; border-radius:2px; }
   .row { display:flex; justify-content:space-between; padding:5px 0; border-top:1px solid var(--line); font-size:13px; }
@@ -95,7 +95,7 @@
       <select id="pair"></select>
       <button class="ctl" data-w="24h">24h</button><button class="ctl" data-w="7d">7d</button><button class="ctl" data-w="30d" aria-pressed="true">30d</button>
       <span style="width:8px"></span>
-      <button class="ctl" data-v="price" aria-pressed="true" title="what each oracle wrote">price</button><button class="ctl" data-v="spread" title="how far each write sits from the median of the three">vs median</button>
+      <button class="ctl" data-v="price" aria-pressed="true" title="what each oracle wrote">price</button><button class="ctl" data-v="spread" title="how far each write sits from the median of the oracles">vs median</button>
     </div>
     <div class="status" id="status">loading…</div>
   </header>
@@ -164,9 +164,9 @@
 /* Flip these to change how the main chart is drawn. */
 const CONFIG = { area:false, smooth:false, dots:true, grid:true, height:380, heightNarrow:260, animate:true };
 
-const COLORS = { chainlink:'#3b82f6', chronicle:'#22c55e', redstone:'#e11d48' };
-const NAMES = { chainlink:'Chainlink', chronicle:'Chronicle', redstone:'RedStone' };
-const ORDER = ['chainlink','chronicle','redstone'];
+const COLORS = { chainlink:'#3b82f6', chronicle:'#22c55e', redstone:'#e11d48', pyth:'#a855f7' };
+const NAMES = { chainlink:'Chainlink', chronicle:'Chronicle', redstone:'RedStone', pyth:'Pyth' };
+const ORDER = ['chainlink','chronicle','redstone','pyth'];
 const SECS = { '24h':86400, '7d':604800, '30d':2592000 };
 const qs0 = new URLSearchParams(location.search);
 let pair = qs0.get('pair') || 'ETH', win = ['24h','7d','30d'].includes(qs0.get('window')) ? qs0.get('window') : '30d', view = qs0.get('view') === 'spread' ? 'spread' : 'price';
@@ -336,7 +336,7 @@ $('#chart').addEventListener('mousemove', (e) => {
     return `<div class="r ${o===best.o?'on':''}"><span class="ring" style="${ring(COLORS[o],12)}"></span><span class="nm">${NAMES[o]}</span><span class="v">${v==null?'n/a':fmtP(v)}</span><span class="b ${hot?'hot':''}" style="${bps==null?'visibility:hidden':''}">${bps==null?'':(bps>0?'+':'')+bps.toFixed(1)+' bps'}</span></div>`;
   }).join('');
   const tip = $('#tip');
-  tip.innerHTML = `<div class="when">${ts(tStar)}</div><div>${rows}</div><div class="ft">write by ${NAMES[best.o]} · gas ${fmtU(best.p.c)}${best.p.n>1?` (1/${best.p.n} of tx)`:''}${best.p.op?' · <span style="color:#f59e0b">optimistic</span>':''}</div>`;
+  tip.innerHTML = `<div class="when">${ts(tStar)}</div><div>${rows}</div><div class="ft">write by ${NAMES[best.o]} · gas ${fmtU(best.p.c)}${best.p.n>1?` (1/${best.p.n} of tx)`:''}${best.p.op?' · <span style="color:#f59e0b">optimistic</span>':''}<br>double-click to open the transaction on Etherscan</div>`;
   tip.style.display = 'block';
   const plot = $('#plot'), panel = $('#mpanel');
   const hx = plot.offsetLeft + best.x, hy = plot.offsetTop + best.y, tw = tip.offsetWidth, th = tip.offsetHeight;
@@ -344,6 +344,13 @@ $('#chart').addEventListener('mousemove', (e) => {
   tip.style.top = (hy + 12 + th > panel.clientHeight - 8 ? Math.max(4, hy - th - 12) : hy + 12) + 'px';
 });
 $('#chart').addEventListener('mouseleave', hideTip);
+/* Double-click a point: open its transaction on Etherscan. */
+$('#chart').addEventListener('dblclick', (e) => {
+  const r = $('#chart').getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
+  let best = null, bd = 18*18;
+  for (const q of mainPts){ const d = (q.x-mx)**2 + (q.y-my)**2; if (d < bd){ bd = d; best = q; } }
+  if (best && best.p.tx) window.open('https://etherscan.io/tx/' + best.p.tx, '_blank', 'noopener');
+});
 
 /* ---------- legend ---------- */
 function renderLegend(){
@@ -368,9 +375,9 @@ function renderStats(){
       <div class="row"><span>Total gas (${win})<small>${rule[o]||''}</small></span><span>${fmtU(x.costTotalUsd)}</span></div>
       <div class="row"><span>Avg per update</span><span>${fmtU(x.costAvgUsd)}</span></div>
       <div class="row"><span>Most expensive</span><span>${fmtU(x.costMaxUsd)}</span></div>
-      <div class="row"><span>Latest on-chain<small>${x.lastAt?ts(x.lastAt):''}</small></span><span>${x.lastValue!=null?fmtP(x.lastValue):'n/a'} <span style="color:#8a93a0">· ${age(x.ageSeconds)} old</span></span></div>
+      <div class="row"><span>Latest on-chain<small>${x.lastAt?ts(x.lastAt):''}${x.fromContract?' · stored price, no write in history':''}</small></span><span>${x.lastValue!=null?fmtP(x.lastValue):'n/a'} <span style="color:#8a93a0">· ${age(x.ageSeconds)} old</span></span></div>
     </div>`; }).join('');
-  $('#foot').innerHTML = `Every point is one on-chain write, read from the oracle contracts' own events on Ethereum. Nothing sampled, nothing estimated. Gas is priced in USD at the Chainlink ETH/USD rate at the time each update was recorded (now $${(stats.ethUsd||0).toFixed(0)}). RedStone writes several feeds per transaction, so its gas is split evenly across the feeds in that transaction; Chainlink and Chronicle write one feed per transaction. Chronicle points marked <span style="color:#f59e0b">optimistic</span> are OpPoked writes that finalise later. Max deviation is the largest move between two consecutive updates of the same oracle. In the <b>vs median</b> view each write is shown as its distance from the median of the oracles' latest values at that moment${(stats.oracles||[]).length===2?'; with two oracles that median is simply their midpoint, so the two sit at half the gap from each other, and a swing is not one of them being wrong':''}. Independent, not affiliated with any oracle.`;
+  $('#foot').innerHTML = `Every point is one on-chain write, read from the oracle contracts' own events on Ethereum. Nothing sampled, nothing estimated. Gas is priced in USD at the Chainlink ETH/USD rate at the time each update was recorded (now $${(stats.ethUsd||0).toFixed(0)}). RedStone and Pyth can write several feeds in one transaction, so their gas is split evenly across the feeds in that transaction; Chainlink and Chronicle write one feed per transaction. Pyth is a pull oracle: its price reaches Ethereum only when someone pushes it, so a gap means nobody did, and when no Pyth write is in the history its card shows the price stored in the Pyth contract and how old it is. Chronicle points marked <span style="color:#f59e0b">optimistic</span> are OpPoked writes that finalise later. Max deviation is the largest move between two consecutive updates of the same oracle. In the <b>vs median</b> view each write is shown as its distance from the median of the oracles' latest values at that moment${(stats.oracles||[]).length===2?'; with two oracles that median is simply their midpoint, so the two sit at half the gap from each other, and a swing is not one of them being wrong':''}. Double-click a point to open its transaction on Etherscan. Independent, not affiliated with any oracle.`;
 }
 
 /* ---------- update cadence (stacked area) ---------- */
@@ -545,8 +552,8 @@ $('#moreBtn').addEventListener('click', e => { e.stopPropagation(); const m = $(
 document.addEventListener('click', e => { if (!$('#more').contains(e.target)) $('#menu').dataset.open = '0'; });
 $('#mCsv').addEventListener('click', () => {
   if (!data) return;
-  const rows = [['oracle','time_utc','value','gas_usd','feeds_in_tx','optimistic']];
-  for (const o of ORDER) for (const q of data.updates[o]||[]) rows.push([o, new Date(q.t*1000).toISOString(), q.v, q.c, q.n||1, q.op?'yes':'no']);
+  const rows = [['oracle','time_utc','value','gas_usd','feeds_in_tx','optimistic','block','tx']];
+  for (const o of ORDER) for (const q of data.updates[o]||[]) rows.push([o, new Date(q.t*1000).toISOString(), q.v, q.c, q.n||1, q.op?'yes':'no', q.b, q.tx]);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([rows.map(r=>r.join(',')).join('\n')], {type:'text/csv'}));
   a.download = `oracle-ledger-${pair}-${win}.csv`; a.click();
