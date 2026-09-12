@@ -168,6 +168,9 @@ const COLORS = { chainlink:'#3b82f6', chronicle:'#22c55e', redstone:'#e11d48', p
 const NAMES = { chainlink:'Chainlink', chronicle:'Chronicle', redstone:'RedStone', pyth:'Pyth' };
 const ORDER = ['chainlink','chronicle','redstone','pyth'];
 const SECS = { '24h':86400, '7d':604800, '30d':2592000 };
+/* A value nobody has rewritten for this long is not a live quote. It is dimmed, marked stale and
+   left out of the median instead of being compared with prices from today. */
+const STALE = 36*3600;
 const qs0 = new URLSearchParams(location.search);
 let pair = qs0.get('pair') || 'ETH', win = ['24h','7d','30d'].includes(qs0.get('window')) ? qs0.get('window') : '30d', view = qs0.get('view') === 'spread' ? 'spread' : 'price';
 const linkQS = () => `?pair=${pair}&window=${win}${view==='spread'?'&view=spread':''}`;
@@ -202,13 +205,14 @@ function label(layer, x, y, text, anchor){
    in price terms come apart here. */
 function spreadSeries(updates, prior){
   const merged = ORDER.flatMap(o => (updates[o]||[]).map(p => ({...p, o}))).sort((a,b)=>a.t-b.t);
-  const last = Object.fromEntries(Object.entries(prior || {}).filter(([, v]) => v != null)); const out = Object.fromEntries(ORDER.map(o=>[o,[]]));
+  const last = {}; const out = Object.fromEntries(ORDER.map(o=>[o,[]]));
+  for (const [o, x] of Object.entries(prior || {})) if (x && x.v != null) last[o] = { v: x.v, t: x.t };
   for (const p of merged){
-    last[p.o] = p.v;
-    const vals = ORDER.map(o=>last[o]).filter(v=>v!=null).sort((a,b)=>a-b);
+    last[p.o] = { v: p.v, t: p.t };
+    const vals = ORDER.filter(o => last[o] && p.t - last[o].t <= STALE).map(o => last[o].v).sort((a,b)=>a-b);
     if (vals.length < 2) continue;
     const med = vals.length%2 ? vals[vals.length>>1] : (vals[vals.length/2-1]+vals[vals.length/2])/2;
-    out[p.o].push({...p, price:p.v, v:(p.v-med)/med*10000, med, snap:{...last}});
+    out[p.o].push({...p, price:p.v, v:(p.v-med)/med*10000, med, snap:Object.fromEntries(Object.entries(last).map(([o,x])=>[o,{...x}]))});
   }
   return out;
 }
@@ -322,18 +326,25 @@ $('#chart').addEventListener('mousemove', (e) => {
   cur.appendChild(NS('circle',{cx:best.x.toFixed(1),cy:best.y.toFixed(1),r:5,fill:'#12151a',stroke:COLORS[best.o],'stroke-width':2}));
   svg.appendChild(cur);
 
-  const vis = visible(), tStar = best.p.t; let latest, med;
-  if (view === 'spread'){ latest = { ...best.p.snap }; med = best.p.med; }
+  const vis = visible(), tStar = best.p.t; let snap, med;
+  if (view === 'spread'){ snap = best.p.snap; med = best.p.med; }
   else {
-    latest = {};
-    for (const o of trackedSet()){ const arr = data.updates[o] || []; let v = null; for (let i=arr.length-1;i>=0;i--) if (arr[i].t <= tStar){ v = arr[i].v; break; } latest[o] = v; }
-    latest[best.o] = best.p.v;
-    const vals = Object.values(latest).filter(v=>v!=null).sort((a,b)=>a-b);
+    snap = {};
+    for (const o of trackedSet()){
+      const arr = data.updates[o] || []; let u = null;
+      for (let i=arr.length-1;i>=0;i--) if (arr[i].t <= tStar){ u = { v: arr[i].v, t: arr[i].t }; break; }
+      if (!u && data.prior && data.prior[o]) u = { v: data.prior[o].v, t: data.prior[o].t };
+      if (u) snap[o] = u;
+    }
+    snap[best.o] = { v: best.p.v, t: best.p.t };
+    const vals = Object.values(snap).filter(x => tStar - x.t <= STALE).map(x => x.v).sort((a,b)=>a-b);
     med = vals.length >= 2 ? (vals.length%2 ? vals[vals.length>>1] : (vals[vals.length/2-1]+vals[vals.length/2])/2) : null;
   }
   const rows = vis.map(o => {
-    const v = latest[o], bps = (v != null && med) ? (v-med)/med*1e4 : null, hot = bps != null && Math.abs(bps) >= 10;
-    return `<div class="r ${o===best.o?'on':''}"><span class="ring" style="${ring(COLORS[o],12)}"></span><span class="nm">${NAMES[o]}</span><span class="v">${v==null?'n/a':fmtP(v)}</span><span class="b ${hot?'hot':''}" style="${bps==null?'visibility:hidden':''}">${bps==null?'':(bps>0?'+':'')+bps.toFixed(1)+' bps'}</span></div>`;
+    const x = snap[o], v = x ? x.v : null, stale = Boolean(x) && tStar - x.t > STALE;
+    const bps = (v != null && med != null && !stale) ? (v-med)/med*1e4 : null, hot = bps != null && Math.abs(bps) >= 10;
+    const badge = bps != null ? (bps>0?'+':'') + bps.toFixed(1) + ' bps' : stale ? age(tStar - x.t) + ' stale' : '';
+    return `<div class="r ${o===best.o?'on':''}"><span class="ring" style="${ring(COLORS[o],12)}"></span><span class="nm">${NAMES[o]}</span><span class="v"${stale?' style="opacity:.5"':''}>${v==null?'n/a':fmtP(v)}</span><span class="b ${hot?'hot':''}" style="${badge?'':'visibility:hidden'}">${badge}</span></div>`;
   }).join('');
   const tip = $('#tip');
   tip.innerHTML = `<div class="when">${ts(tStar)}</div><div>${rows}</div><div class="ft">write by ${NAMES[best.o]} · gas ${fmtU(best.p.c)}${best.p.n>1?` (1/${best.p.n} of tx)`:''}${best.p.op?' · <span style="color:#f59e0b">optimistic</span>':''}<br>double-click to open the transaction on Etherscan</div>`;
@@ -377,7 +388,7 @@ function renderStats(){
       <div class="row"><span>Most expensive</span><span>${fmtU(x.costMaxUsd)}</span></div>
       <div class="row"><span>Latest on-chain<small>${x.lastAt?ts(x.lastAt):''}${x.fromContract?' · stored price, no write in history':''}</small></span><span>${x.lastValue!=null?fmtP(x.lastValue):'n/a'} <span style="color:#8a93a0">· ${age(x.ageSeconds)} old</span></span></div>
     </div>`; }).join('');
-  $('#foot').innerHTML = `Every point is one on-chain write, read from the oracle contracts' own events on Ethereum. Nothing sampled, nothing estimated. Gas is priced in USD at the Chainlink ETH/USD rate at the time each update was recorded (now $${(stats.ethUsd||0).toFixed(0)}). RedStone and Pyth can write several feeds in one transaction, so their gas is split evenly across the feeds in that transaction; Chainlink and Chronicle write one feed per transaction. Pyth is a pull oracle: its price reaches Ethereum only when someone pushes it, so a gap means nobody did, and when no Pyth write is in the history its card shows the price stored in the Pyth contract and how old it is. Chronicle points marked <span style="color:#f59e0b">optimistic</span> are OpPoked writes that finalise later. Max deviation is the largest move between two consecutive updates of the same oracle. In the <b>vs median</b> view each write is shown as its distance from the median of the oracles' latest values at that moment${(stats.oracles||[]).length===2?'; with two oracles that median is simply their midpoint, so the two sit at half the gap from each other, and a swing is not one of them being wrong':''}. Double-click a point to open its transaction on Etherscan. Independent, not affiliated with any oracle.`;
+  $('#foot').innerHTML = `Every point is one on-chain write, read from the oracle contracts' own events on Ethereum. Nothing sampled, nothing estimated. Gas is priced in USD at the Chainlink ETH/USD rate at the time each update was recorded (now $${(stats.ethUsd||0).toFixed(0)}). RedStone and Pyth can write several feeds in one transaction, so their gas is split evenly across the feeds in that transaction; Chainlink and Chronicle write one feed per transaction. Pyth is a pull oracle: its price reaches Ethereum only when someone pushes it, so a gap means nobody did, and when no Pyth write is in the history its card shows the price stored in the Pyth contract and how old it is. A value nobody has rewritten for more than 36 hours is dimmed in the tooltip, marked stale and left out of the median, because comparing a weeks-old write against today's prices says nothing about either. Chronicle points marked <span style="color:#f59e0b">optimistic</span> are OpPoked writes that finalise later. Max deviation is the largest move between two consecutive updates of the same oracle. In the <b>vs median</b> view each write is shown as its distance from the median of the oracles' latest values at that moment${(stats.oracles||[]).length===2?'; with two oracles that median is simply their midpoint, so the two sit at half the gap from each other, and a swing is not one of them being wrong':''}. Double-click a point to open its transaction on Etherscan. Independent, not affiliated with any oracle.`;
 }
 
 /* ---------- update cadence (stacked area) ---------- */

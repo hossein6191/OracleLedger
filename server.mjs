@@ -126,7 +126,7 @@ createServer((req, res) => {
     for (const o of ORACLES) {
       const series = state.pairs[pair][o];
       let last = null; for (const u of series) if (u.t < from && (!last || u.t >= last.t)) last = u;
-      prior[o] = last ? last.value : null; // each oracle's last value before the window, so "vs median" starts with a full median
+      prior[o] = last ? { v: last.value, t: last.t } : null; // each oracle's last value before the window, so "vs median" starts with a full median
       out[o] = series.filter((u) => u.t >= from).map((u) => ({ t: u.t, v: u.value, c: u.costUsd, tx: u.transactionHash, b: u.blockNumber, n: u.feedsInTx, op: u.optimistic || undefined }));
     }
     return json(res, { pair, oracles: oraclesFor(pair), window: winKey, ethUsd: state.ethUsd, prior, updates: out });
