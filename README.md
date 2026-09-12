@@ -1,7 +1,8 @@
 # Oracle Ledger
 
 Every on-chain oracle update for a pair, side by side: Chainlink, Chronicle,
-RedStone and Pyth on Ethereum, with a month of history, refreshed every 30 seconds.
+RedStone and Pyth, on Ethereum and on Base, with a month of history, refreshed
+every 30 seconds.
 
 **https://oracleledger.up.railway.app**
 
@@ -11,25 +12,31 @@ Under the chart, per oracle and per window: how many times it wrote, the largest
 move between two consecutive writes, and what that gas cost in dollars.
 Double-click a point to open its transaction on Etherscan.
 
-## Pairs
+## Chains and pairs
 
-| pair | Chainlink | Chronicle | RedStone | Pyth |
-| --- | --- | --- | --- | --- |
-| ETH / USD | yes | yes | yes | yes |
-| BTC / USD | yes | yes | yes | yes |
-| USDC / USD | yes | not tracked | yes | yes |
-| USDT / USD | yes | not tracked | yes | yes |
+| chain | pair | Chainlink | Chronicle | RedStone | Pyth |
+| --- | --- | --- | --- | --- | --- |
+| Ethereum | ETH / USD | yes | yes | yes | yes |
+| Ethereum | BTC / USD | yes | yes | yes | yes |
+| Ethereum | USDC / USD | yes | not tracked | yes | yes |
+| Ethereum | USDT / USD | yes | not tracked | yes | yes |
+| Base | ETH / USD | yes | yes | yes | yes |
+| Base | BTC / USD | yes | not tracked | yes | yes |
 
-*Not tracked* means no contract for that oracle and pair was verified on Ethereum,
-not that none exists.
+*Not tracked* means no contract for that oracle and pair was verified on that
+chain, not that none exists. On Base, Chronicle publishes WBTC / USD and
+cbBTC / USD but no plain BTC / USD.
 
-## Pyth on Ethereum
+## Pyth, and why Base is here
 
-Pyth is a pull oracle. A Pyth price lands on Ethereum only when someone pays to
-push it, so the chart shows exactly as many Pyth points as there were pushes, and
-on Ethereum mainnet some feeds go weeks without one. When no Pyth write for a pair
-is in the history, its card shows the price stored in the Pyth contract
-(`getPriceUnsafe`) and how old it is.
+Pyth is a pull oracle. A Pyth price lands on a chain only when someone pays to
+push it, so the chart shows exactly as many Pyth points as there were pushes. On
+Ethereum mainnet that is very few: ETH / USD is written a handful of times a
+month and BTC / USD not at all, which is why Base is here too, where Pyth writes
+both pairs every day. When no Pyth write for a pair is in the history, its card
+shows the price stored in the Pyth contract (`getPriceUnsafe`) and how old it is,
+and any value with no write for more than 36 hours is marked stale in the tooltip
+and left out of the median.
 
 ## Two views
 

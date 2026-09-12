@@ -89,9 +89,10 @@
     <div class="brand">
       <img src="assets/redstone-logo.svg" alt="RedStone">
       <h1>Oracle Ledger</h1>
-      <span class="sub">every on-chain update, side by side · Ethereum</span>
+      <span class="sub">every on-chain update, side by side · <span id="chainName">Ethereum</span></span>
     </div>
     <div class="controls">
+      <select id="chain"></select>
       <select id="pair"></select>
       <button class="ctl" data-w="24h">24h</button><button class="ctl" data-w="7d">7d</button><button class="ctl" data-w="30d" aria-pressed="true">30d</button>
       <span style="width:8px"></span>
@@ -167,13 +168,15 @@ const CONFIG = { area:false, smooth:false, dots:true, grid:true, height:380, hei
 const COLORS = { chainlink:'#3b82f6', chronicle:'#22c55e', redstone:'#e11d48', pyth:'#a855f7' };
 const NAMES = { chainlink:'Chainlink', chronicle:'Chronicle', redstone:'RedStone', pyth:'Pyth' };
 const ORDER = ['chainlink','chronicle','redstone','pyth'];
+let CHAIN_LABEL = 'Ethereum', EXPLORER = { name: 'Etherscan', tx: 'https://etherscan.io/tx/' };
 const SECS = { '24h':86400, '7d':604800, '30d':2592000 };
 /* A value nobody has rewritten for this long is not a live quote. It is dimmed, marked stale and
    left out of the median instead of being compared with prices from today. */
 const STALE = 36*3600;
 const qs0 = new URLSearchParams(location.search);
+let chain = qs0.get('chain') || 'ethereum';
 let pair = qs0.get('pair') || 'ETH', win = ['24h','7d','30d'].includes(qs0.get('window')) ? qs0.get('window') : '30d', view = qs0.get('view') === 'spread' ? 'spread' : 'price';
-const linkQS = () => `?pair=${pair}&window=${win}${view==='spread'?'&view=spread':''}`;
+const linkQS = () => `?chain=${chain}&pair=${pair}&window=${win}${view==='spread'?'&view=spread':''}`;
 let data = null, stats = null, rule = {}, hidden = {}, mainPts = [], cadGeo = null, cadCounts = null, mounted = false;
 
 const $ = (s) => document.querySelector(s);
@@ -231,27 +234,31 @@ function monotone(p){
 const linePath = (pts, smooth) => !pts.length ? '' : (smooth && pts.length > 2 ? monotone(pts) : pts.map((p,i)=>(i?'L':'M')+p.x.toFixed(1)+' '+p.y.toFixed(1)).join(''));
 
 async function loadPairs(){
-  const p = await (await fetch('/api/pairs')).json();
+  let p = await (await fetch(`/api/pairs?chain=${chain}`)).json();
+  if (p.error){ chain = 'ethereum'; p = await (await fetch(`/api/pairs?chain=${chain}`)).json(); }
   rule = p.costRule;
+  const c = (p.chains||[]).find(x => x.id === chain);
+  if (c){ CHAIN_LABEL = c.label; EXPLORER = c.explorer; $('#chainName').textContent = c.label; }
+  $('#chain').innerHTML = (p.chains||[]).map(x => `<option value="${x.id}" ${x.id===chain?'selected':''}>${x.label}</option>`).join('');
   if (!p.pairs.some(x => x.id === pair)) pair = p.pairs[0].id;
   $('#pair').innerHTML = p.pairs.map(x => `<option value="${x.id}" ${x.id===pair?'selected':''}>${x.label}</option>`).join('');
 }
 async function refresh(){
-  const p = pair, w = win;
+  const k = chain, p = pair, w = win;
   let u, s, h;
   try {
     [u, s, h] = await Promise.all([
-      fetch(`/api/updates?pair=${p}&window=${w}`).then(r=>r.json()),
-      fetch(`/api/stats?pair=${p}`).then(r=>r.json()),
+      fetch(`/api/updates?chain=${k}&pair=${p}&window=${w}`).then(r=>r.json()),
+      fetch(`/api/stats?chain=${k}&pair=${p}`).then(r=>r.json()),
       fetch('/api/health').then(r=>r.json()),
     ]);
   } catch (e) { $('#status').innerHTML = `<span class="warn">refresh failed, retrying in 30 s</span>`; return; }
-  if (p !== pair || w !== win) return; /* a newer request owns the screen */
+  if (k !== chain || p !== pair || w !== win) return; /* a newer request owns the screen */
   if (!u || u.error || !u.updates || !s || !s.stats){ $('#status').innerHTML = `<span class="warn">${(u && u.error) || (s && s.error) || 'no data'}</span>`; return; }
   data = u; stats = s;
-  const bf = h.backfill || {};
-  $('#status').innerHTML = bf.status === 'running' ? `<span class="warn">backfilling ${h.historyDays} days via ${h.source}…</span>`
-    : `updated ${new Date().toISOString().slice(11,19)} UTC · block ${h.lastBlock} · ETH $${(h.ethUsd||0).toFixed(0)}`;
+  const hc = (h.chains||{})[k] || {}, bf = hc.backfill || {};
+  $('#status').innerHTML = bf.status === 'running' ? `<span class="warn">backfilling ${h.historyDays} days of ${CHAIN_LABEL} via ${hc.source}…</span>`
+    : `updated ${new Date().toISOString().slice(11,19)} UTC · ${CHAIN_LABEL} block ${hc.lastBlock} · ETH $${(hc.ethUsd||0).toFixed(0)}`;
   renderAll();
   history.replaceState(null,'',linkQS());
 }
@@ -347,7 +354,7 @@ $('#chart').addEventListener('mousemove', (e) => {
     return `<div class="r ${o===best.o?'on':''}"><span class="ring" style="${ring(COLORS[o],12)}"></span><span class="nm">${NAMES[o]}</span><span class="v"${stale?' style="opacity:.5"':''}>${v==null?'n/a':fmtP(v)}</span><span class="b ${hot?'hot':''}" style="${badge?'':'visibility:hidden'}">${badge}</span></div>`;
   }).join('');
   const tip = $('#tip');
-  tip.innerHTML = `<div class="when">${ts(tStar)}</div><div>${rows}</div><div class="ft">write by ${NAMES[best.o]} · gas ${fmtU(best.p.c)}${best.p.n>1?` (1/${best.p.n} of tx)`:''}${best.p.op?' · <span style="color:#f59e0b">optimistic</span>':''}<br>double-click to open the transaction on Etherscan</div>`;
+  tip.innerHTML = `<div class="when">${ts(tStar)}</div><div>${rows}</div><div class="ft">write by ${NAMES[best.o]} · gas ${fmtU(best.p.c)}${best.p.n>1?` (1/${best.p.n} of tx)`:''}${best.p.op?' · <span style="color:#f59e0b">optimistic</span>':''}<br>double-click to open the transaction on ${EXPLORER.name}</div>`;
   tip.style.display = 'block';
   const plot = $('#plot'), panel = $('#mpanel');
   const hx = plot.offsetLeft + best.x, hy = plot.offsetTop + best.y, tw = tip.offsetWidth, th = tip.offsetHeight;
@@ -360,7 +367,7 @@ $('#chart').addEventListener('dblclick', (e) => {
   const r = $('#chart').getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top;
   let best = null, bd = 18*18;
   for (const q of mainPts){ const d = (q.x-mx)**2 + (q.y-my)**2; if (d < bd){ bd = d; best = q; } }
-  if (best && best.p.tx) window.open('https://etherscan.io/tx/' + best.p.tx, '_blank', 'noopener');
+  if (best && best.p.tx) window.open(EXPLORER.tx + best.p.tx, '_blank', 'noopener');
 });
 
 /* ---------- legend ---------- */
@@ -379,7 +386,7 @@ function renderLegend(){
 function renderStats(){
   const s = stats.stats[win], tracked = trackedSet();
   $('#stats').innerHTML = ORDER.map(o => { const x = s[o];
-    if (!tracked.has(o)) return `<div class="panel card" style="opacity:.55"><h3><i style="background:${COLORS[o]}"></i>${NAMES[o]}</h3><div class="row"><span>Not tracked for this pair<small>no ${NAMES[o]} contract verified on Ethereum for it; this says nothing about whether one exists</small></span><span>n/a</span></div></div>`;
+    if (!tracked.has(o)) return `<div class="panel card" style="opacity:.55"><h3><i style="background:${COLORS[o]}"></i>${NAMES[o]}</h3><div class="row"><span>Not tracked for this pair<small>no ${NAMES[o]} contract verified on ${CHAIN_LABEL} for it; this says nothing about whether one exists</small></span><span>n/a</span></div></div>`;
     return `<div class="panel card"><h3><i style="background:${COLORS[o]}"></i>${NAMES[o]}</h3>
       <div class="row"><span>Updates (${win})</span><span>${x.updates}</span></div>
       <div class="row"><span>Max deviation<small>between consecutive updates</small></span><span>${x.maxDeviationPct.toFixed(4)}%</span></div>
@@ -388,7 +395,7 @@ function renderStats(){
       <div class="row"><span>Most expensive</span><span>${fmtU(x.costMaxUsd)}</span></div>
       <div class="row"><span>Latest on-chain<small>${x.lastAt?ts(x.lastAt):''}${x.fromContract?' · stored price, no write in history':''}</small></span><span>${x.lastValue!=null?fmtP(x.lastValue):'n/a'} <span style="color:#8a93a0">· ${age(x.ageSeconds)} old</span></span></div>
     </div>`; }).join('');
-  $('#foot').innerHTML = `Every point is one on-chain write, read from the oracle contracts' own events on Ethereum. Nothing sampled, nothing estimated. Gas is priced in USD at the Chainlink ETH/USD rate at the time each update was recorded (now $${(stats.ethUsd||0).toFixed(0)}). RedStone and Pyth can write several feeds in one transaction, so their gas is split evenly across the feeds in that transaction; Chainlink and Chronicle write one feed per transaction. Pyth is a pull oracle: its price reaches Ethereum only when someone pushes it, so a gap means nobody did, and when no Pyth write is in the history its card shows the price stored in the Pyth contract and how old it is. A value nobody has rewritten for more than 36 hours is dimmed in the tooltip, marked stale and left out of the median, because comparing a weeks-old write against today's prices says nothing about either. Chronicle points marked <span style="color:#f59e0b">optimistic</span> are OpPoked writes that finalise later. Max deviation is the largest move between two consecutive updates of the same oracle. In the <b>vs median</b> view each write is shown as its distance from the median of the oracles' latest values at that moment${(stats.oracles||[]).length===2?'; with two oracles that median is simply their midpoint, so the two sit at half the gap from each other, and a swing is not one of them being wrong':''}. Double-click a point to open its transaction on Etherscan. Independent, not affiliated with any oracle.`;
+  $('#foot').innerHTML = `Every point is one on-chain write, read from the oracle contracts' own events on ${CHAIN_LABEL}. Nothing sampled, nothing estimated. Gas is priced in USD at the Chainlink ETH/USD rate at the time each update was recorded (now $${(stats.ethUsd||0).toFixed(0)}). RedStone and Pyth can write several feeds in one transaction, so their gas is split evenly across the feeds in that transaction; Chainlink and Chronicle write one feed per transaction. Pyth is a pull oracle: its price reaches Ethereum only when someone pushes it, so a gap means nobody did, and when no Pyth write is in the history its card shows the price stored in the Pyth contract and how old it is. A value nobody has rewritten for more than 36 hours is dimmed in the tooltip, marked stale and left out of the median, because comparing a weeks-old write against today's prices says nothing about either. Chronicle points marked <span style="color:#f59e0b">optimistic</span> are OpPoked writes that finalise later. Max deviation is the largest move between two consecutive updates of the same oracle. In the <b>vs median</b> view each write is shown as its distance from the median of the oracles' latest values at that moment${(stats.oracles||[]).length===2?'; with two oracles that median is simply their midpoint, so the two sit at half the gap from each other, and a swing is not one of them being wrong':''}. Double-click a point to open its transaction on ${EXPLORER.name}. Independent, not affiliated with any oracle.`;
 }
 
 /* ---------- update cadence (stacked area) ---------- */
@@ -565,6 +572,7 @@ function setRadHover(o){
 document.querySelectorAll('button[data-w]').forEach(b => b.addEventListener('click', () => { win = b.dataset.w; document.querySelectorAll('button[data-w]').forEach(x => x.setAttribute('aria-pressed', x===b)); refresh(); }));
 document.querySelectorAll('button[data-v]').forEach(b => b.addEventListener('click', () => { view = b.dataset.v; document.querySelectorAll('button[data-v]').forEach(x => x.setAttribute('aria-pressed', x===b)); if (data) drawMain(); history.replaceState(null,'',linkQS()); }));
 $('#pair').addEventListener('change', e => { pair = e.target.value; hidden = {}; refresh(); });
+$('#chain').addEventListener('change', e => { chain = e.target.value; hidden = {}; data = null; stats = null; loadPairs().then(refresh); });
 $('#moreBtn').addEventListener('click', e => { e.stopPropagation(); const m = $('#menu'); m.dataset.open = m.dataset.open === '1' ? '0' : '1'; });
 document.addEventListener('click', e => { if (!$('#more').contains(e.target)) $('#menu').dataset.open = '0'; });
 $('#mCsv').addEventListener('click', () => {
