@@ -140,7 +140,7 @@ export async function hypersyncLogs(chain, addresses, topic0s, from, to) {
       logs: [{ address: addresses, ...(topic0s?.length ? { topics: [topic0s] } : {}) }],
       field_selection: {
         log: ['block_number', 'log_index', 'transaction_hash', 'address', 'data', 'topic0', 'topic1', 'topic2', 'topic3'],
-        transaction: ['hash', 'gas_used', 'effective_gas_price'],
+        transaction: ['hash', 'to', 'gas_used', 'effective_gas_price'],
       },
     };
     const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` }, body: JSON.stringify(body) });
@@ -152,7 +152,7 @@ export async function hypersyncLogs(chain, addresses, topic0s, from, to) {
         address: l.address.toLowerCase(), data: l.data,
         topics: [l.topic0, l.topic1, l.topic2, l.topic3].filter((t) => t != null),
       });
-      for (const t of chunk.transactions || []) if (t.gas_used != null && t.effective_gas_price != null) txs.set(t.hash, { gasUsed: BigInt(t.gas_used), effectiveGasPrice: BigInt(t.effective_gas_price) });
+      for (const t of chunk.transactions || []) if (t.gas_used != null && t.effective_gas_price != null) txs.set(t.hash, { gasUsed: BigInt(t.gas_used), effectiveGasPrice: BigInt(t.effective_gas_price), to: t.to ? t.to.toLowerCase() : null });
     }
     if (!j.next_block || j.next_block <= next) break;
     next = j.next_block;
@@ -163,8 +163,11 @@ export async function hypersyncLogs(chain, addresses, topic0s, from, to) {
 // Fill in gas for any transaction HyperSync did not give us (or all of them on the RPC path).
 export async function receiptsFor(chain, hashes) {
   const results = await rpcBatch(chain, hashes.map((h) => ({ method: 'eth_getTransactionReceipt', params: [h] })));
+  // A rate-limited node answers a batch with per-call errors; fetch those one by one instead of
+  // silently leaving their gas unknown.
+  for (let i = 0; i < hashes.length; i++) if (!results[i]) results[i] = await rpc(chain, 'eth_getTransactionReceipt', [hashes[i]]).catch(() => null);
   const m = new Map();
-  hashes.forEach((h, i) => { const r = results[i]; if (r) m.set(h, { gasUsed: BigInt(r.gasUsed), effectiveGasPrice: BigInt(r.effectiveGasPrice) }); });
+  hashes.forEach((h, i) => { const r = results[i]; if (r) m.set(h, { gasUsed: BigInt(r.gasUsed), effectiveGasPrice: BigInt(r.effectiveGasPrice), to: r.to ? r.to.toLowerCase() : null }); });
   return m;
 }
 

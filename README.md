@@ -27,16 +27,23 @@ Double-click a point to open its transaction on Etherscan.
 chain, not that none exists. On Base, Chronicle publishes WBTC / USD and
 cbBTC / USD but no plain BTC / USD.
 
-## Pyth, and why Base is here
+## Pyth
 
-Pyth is a pull oracle. A Pyth price lands on a chain only when someone pays to
-push it, so the chart shows exactly as many Pyth points as there were pushes. On
-Ethereum mainnet that is very few: ETH / USD is written a handful of times a
-month and BTC / USD not at all, which is why Base is here too, where Pyth writes
-both pairs every day. When no Pyth write for a pair is in the history, its card
-shows the price stored in the Pyth contract (`getPriceUnsafe`) and how old it is,
-and any value with no write for more than 36 hours is marked stale in the tooltip
-and left out of the median.
+Pyth is a pull oracle: a Pyth price lands on a chain only when someone pays to push
+it, so the chart shows exactly as many Pyth points as there were pushes.
+
+Pyth moved to upgraded core contracts on 26 August 2026. On each chain the site reads
+both, the legacy core up to that date and the upgraded core after it, so a month of
+history stays whole and a feed still pushed to both contracts is not counted twice.
+
+On Ethereum, Pyth pushes ETH / USD, BTC / USD and USDC / USD. It does not push
+USDT / USD, so that card shows the price stored in the Pyth contract
+(`getPriceUnsafe`) and how old it is. Any value with no write for more than 36 hours
+is marked stale in the tooltip and left out of the median.
+
+Many Pyth pushes happen inside another app's transaction, whose gas also pays for the
+app's own work. Only pushes sent straight to a Pyth contract are priced, and the card
+says how many were.
 
 ## Two views
 

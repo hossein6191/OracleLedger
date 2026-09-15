@@ -27,6 +27,11 @@ const PYTH_ID = {
   USDT: '0x2b89b9dc8fdf9f34709a5b106b472f0f39bb6ca9ce04b0fd7f2e971688e2e53b',
 };
 
+// Pyth moved to upgraded core contracts on 26 Aug 2026. Each chain lists both: the upgraded
+// core, and the legacy core read only up to the upgrade, so a month of history stays whole
+// and a feed that is still pushed to both contracts is not counted twice.
+const PYTH_UPGRADE = Date.UTC(2026, 7, 26) / 1000;
+
 export const CHAINS = {
   ethereum: {
     label: 'Ethereum',
@@ -38,8 +43,11 @@ export const CHAINS = {
     explorer: { name: 'Etherscan', tx: 'https://etherscan.io/tx/' },
     // RedStone writes every feed through one adapter; the feed id is inside the event.
     redstoneAdapter: '0xd72a6BA4a87DDB33e801b3f1c7750b2d0911fC6C',
-    // Pyth is a pull oracle: one contract, and a price lands only when someone pushes it.
-    pyth: '0x4305FB66699C3B2702D4d05CF36551390A4c69C6',
+    // Pyth is a pull oracle: a price lands only when someone pushes it.
+    pythCores: [
+      { address: '0x14b9932cc9AC8Ee03301665a8644A753f46D8552' },
+      { address: '0x4305FB66699C3B2702D4d05CF36551390A4c69C6', until: PYTH_UPGRADE },
+    ],
     // Gas is paid in ETH, priced from this Chainlink feed.
     ethUsdProxy: '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419',
     pairs: {
@@ -61,8 +69,10 @@ export const CHAINS = {
     hypersyncUrl: process.env.BASE_HYPERSYNC_URL || 'https://base.hypersync.xyz/query',
     explorer: { name: 'Basescan', tx: 'https://basescan.org/tx/' },
     redstoneAdapter: '0xb81131B6368b3F0a83af09dB4E39Ac23DA96C2Db',
-    // Base runs two Pyth cores; this is the upgraded one, the current official deployment.
-    pyth: '0xbC16aee60f64864882BC6C4E428e148Fc0E272F5',
+    pythCores: [
+      { address: '0xbC16aee60f64864882BC6C4E428e148Fc0E272F5' },
+      { address: '0x8250f4aF4B972684F7b336503E2D6dFeDeB1487a', until: PYTH_UPGRADE },
+    ],
     ethUsdProxy: '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70',
     pairs: {
       ETH: { label: 'ETH / USD', chainlinkProxy: '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70', redstoneFeedId: 'ETH', chronicle: '0x152598809fb59db55ca76f89a192fb23555531d8', pyth: PYTH_ID.ETH },
@@ -89,5 +99,5 @@ export const COST_RULE = {
   chainlink: 'whole transaction',
   chronicle: 'whole transaction',
   redstone: 'transaction gas divided by feeds updated in it',
-  pyth: 'transaction gas divided by feeds updated in it',
+  pyth: 'transaction gas divided by feeds pushed in it; pushes inside another app\'s transaction are not priced',
 };

@@ -10,7 +10,7 @@ export function statsFor(series, windowSeconds, now = Math.floor(Date.now() / 10
   const total = costs.reduce((a, b) => a + b, 0);
   const last = series[series.length - 1];
   return {
-    updates: w.length, maxDeviationPct: maxDev,
+    updates: w.length, maxDeviationPct: maxDev, costCounted: costs.length,
     costTotalUsd: total, costAvgUsd: costs.length ? total / costs.length : 0, costMaxUsd: costs.length ? Math.max(...costs) : 0,
     lastValue: last?.value ?? null, lastAt: last?.t ?? null, ageSeconds: last ? now - last.t : null,
   };

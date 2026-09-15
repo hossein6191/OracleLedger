@@ -25,7 +25,8 @@ const RT = Object.fromEntries(CHAIN_IDS.map((chain) => {
     feedIdToPair: Object.fromEntries(Object.entries(pairs).map(([p, c]) => [feedIdBytes32(c.redstoneFeedId), p])),
     chronicleToPair: Object.fromEntries(Object.entries(pairs).filter(([, c]) => c.chronicle).map(([p, c]) => [c.chronicle.toLowerCase(), p])),
     pythToPair: Object.fromEntries(Object.entries(pairs).filter(([, c]) => c.pyth).map(([p, c]) => [c.pyth.toLowerCase(), p])),
-    coverage: JSON.stringify(Object.keys(pairs).map((p) => [p, oraclesFor(chain, p)])),
+    coverage: JSON.stringify({ pairs: Object.keys(pairs).map((p) => [p, oraclesFor(chain, p)]), pyth: CHAINS[chain].pythCores }),
+    pythCores: new Map(CHAINS[chain].pythCores.map((x) => [x.address.toLowerCase(), x])),
     polls: 0,
   }];
 }));
@@ -42,7 +43,7 @@ async function ingest(chain, from, to, useArchive) {
     get(chain, Object.values(rt.aggregators), [TOPIC.chainlinkAnswerUpdated], from, to),
     get(chain, [cfg.redstoneAdapter], [TOPIC.redstoneValueUpdate], from, to),
     get(chain, Object.values(pairsOf(chain)).map((c) => c.chronicle).filter(Boolean), [TOPIC.chroniclePoked, TOPIC.chronicleOpPoked], from, to),
-    get(chain, [cfg.pyth], [TOPIC.pythPriceFeedUpdate], from, to),
+    get(chain, cfg.pythCores.map((x) => x.address), [TOPIC.pythPriceFeedUpdate], from, to),
   ]);
 
   // RedStone: how many feeds each transaction wrote, before filtering to ours.
@@ -56,7 +57,12 @@ async function ingest(chain, from, to, useArchive) {
   for (const l of cl.logs) { const pair = Object.keys(rt.aggregators).find((p) => rt.aggregators[p] === l.address); if (pair) wanted.push({ pair, oracle: 'chainlink', log: l, ...decodeChainlink(l), share: 1 }); }
   for (const l of rs.logs) { const d = decodeRedstone(l); const pair = rt.feedIdToPair[d.feedIdRaw]; if (pair) wanted.push({ pair, oracle: 'redstone', log: l, ...d, share: feedsPerTx.get(l.transactionHash) || 1 }); }
   for (const l of ch.logs) { const d = decodeChronicle(l); const pair = rt.chronicleToPair[l.address]; if (pair && d) wanted.push({ pair, oracle: 'chronicle', log: l, ...d, share: 1 }); }
-  for (const l of py.logs) { const d = decodePyth(l); const pair = rt.pythToPair[d.feedIdRaw]; if (pair) wanted.push({ pair, oracle: 'pyth', log: l, ...d, share: pythPerTx.get(l.transactionHash) || 1 }); }
+  for (const l of py.logs) {
+    const d = decodePyth(l), pair = rt.pythToPair[d.feedIdRaw], core = rt.pythCores.get(l.address);
+    // The legacy core is read only up to the upgrade; from then on the upgraded core is the record.
+    if (!pair || !core || (core.until && d.t >= core.until)) continue;
+    wanted.push({ pair, oracle: 'pyth', log: l, ...d, share: pythPerTx.get(l.transactionHash) || 1, directOnly: true });
+  }
 
   // Gas: from HyperSync when it came back with the logs, otherwise from receipts.
   const gas = new Map([...cl.txs, ...rs.txs, ...ch.txs, ...py.txs]);
@@ -67,7 +73,10 @@ async function ingest(chain, from, to, useArchive) {
   let added = 0;
   for (const w of wanted) {
     const g = gas.get(w.log.transactionHash);
-    const costEth = g ? Number(g.gasUsed * g.effectiveGasPrice) / 1e18 : null;
+    // A Pyth push made inside another app's transaction shares that gas with whatever else the
+    // transaction did, so only pushes sent straight to a Pyth core are priced.
+    const priced = Boolean(g) && (!w.directOnly || rt.pythCores.has(g.to));
+    const costEth = priced ? Number(g.gasUsed * g.effectiveGasPrice) / 1e18 : null;
     added += addUpdates(chain, w.pair, w.oracle, [{
       t: w.t, value: w.value, blockNumber: w.log.blockNumber, logIndex: w.log.logIndex, transactionHash: w.log.transactionHash,
       costEth: costEth == null ? null : costEth / w.share, costUsd: costEth == null ? null : (costEth / w.share) * price,
@@ -79,8 +88,16 @@ async function ingest(chain, from, to, useArchive) {
 }
 
 // Pyth's stored price per pair, read from the contract: shown when no Pyth write is in the history.
+// Tries the upgraded core first, then the legacy one: a feed nobody has pushed since the upgrade
+// (USDT/USD on Ethereum) only has a price in the legacy core, and the new core reverts for it.
 async function readPythLatest(chain) {
-  for (const [p, c] of Object.entries(pairsOf(chain))) if (c.pyth) chainState(chain).pythLatest[p] = decodePythPrice(await ethCall(chain, CHAINS[chain].pyth, PYTH_GET_PRICE_UNSAFE + c.pyth.slice(2)));
+  for (const [p, c] of Object.entries(pairsOf(chain))) {
+    if (!c.pyth) continue;
+    for (const core of CHAINS[chain].pythCores) {
+      try { chainState(chain).pythLatest[p] = decodePythPrice(await ethCall(chain, core.address, PYTH_GET_PRICE_UNSAFE + c.pyth.slice(2))); break; }
+      catch { /* not stored in this core, try the next */ }
+    }
+  }
 }
 
 async function backfill(chain) {
