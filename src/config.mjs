@@ -54,8 +54,8 @@ export const CHAINS = {
       ETH: { label: 'ETH / USD', chainlinkProxy: '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419', redstoneFeedId: 'ETH', chronicle: '0x46ef0071b1E2fF6B42d36e5A177EA43Ae5917f4E', pyth: PYTH_ID.ETH },
       BTC: { label: 'BTC / USD', chainlinkProxy: '0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c', redstoneFeedId: 'BTC', chronicle: '0x24C392CDbF32Cf911B258981a66d5541d85269ce', pyth: PYTH_ID.BTC },
       // RedStone publishes the dollar stablecoins on Ethereum as USDC_V2 and USDT_V2.
-      USDC: { label: 'USDC / USD', chainlinkProxy: '0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6', redstoneFeedId: 'USDC_V2', chronicle: null, pyth: PYTH_ID.USDC },
-      USDT: { label: 'USDT / USD', chainlinkProxy: '0x3E7d1eAB13ad0104d2750B8863b489D65364e32D', redstoneFeedId: 'USDT_V2', chronicle: null, pyth: PYTH_ID.USDT },
+      USDC: { label: 'USDC / USD', chainlinkProxy: '0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6', redstoneFeedId: 'USDC_V2', chronicle: '0xce701340261a3dc3541c5f8a6d2be689381c8fcc', pyth: PYTH_ID.USDC },
+      USDT: { label: 'USDT / USD', chainlinkProxy: '0x3E7d1eAB13ad0104d2750B8863b489D65364e32D', redstoneFeedId: 'USDT_V2', chronicle: '0x7084a627a22b2de99e18733dc5aaf40993fa405c', pyth: PYTH_ID.USDT },
     },
   },
   base: {
@@ -77,7 +77,8 @@ export const CHAINS = {
     pairs: {
       ETH: { label: 'ETH / USD', chainlinkProxy: '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70', redstoneFeedId: 'ETH', chronicle: '0x152598809fb59db55ca76f89a192fb23555531d8', pyth: PYTH_ID.ETH },
       // Chronicle publishes WBTC/USD and cbBTC/USD on Base, but no plain BTC/USD scribe.
-      BTC: { label: 'BTC / USD', chainlinkProxy: '0x64c911996D3c6aC71f9b455B1E8E7266BcbD848F', redstoneFeedId: 'BTC', chronicle: null, pyth: PYTH_ID.BTC },
+      BTC: { label: 'BTC / USD', chainlinkProxy: '0x64c911996D3c6aC71f9b455B1E8E7266BcbD848F', redstoneFeedId: 'BTC', chronicle: null, pyth: PYTH_ID.BTC,
+        notes: { chronicle: 'Chronicle publishes WBTC/USD and cbBTC/USD on Base, but no BTC/USD feed (every Chronicle feed written on Base was checked)' } },
     },
   },
 };

@@ -168,7 +168,9 @@ const CONFIG = { area:false, smooth:false, dots:true, grid:true, height:380, hei
 const COLORS = { chainlink:'#3b82f6', chronicle:'#22c55e', redstone:'#e11d48', pyth:'#a855f7' };
 const NAMES = { chainlink:'Chainlink', chronicle:'Chronicle', redstone:'RedStone', pyth:'Pyth' };
 const ORDER = ['chainlink','chronicle','redstone','pyth'];
-let CHAIN_LABEL = 'Ethereum', EXPLORER = { name: 'Etherscan', tx: 'https://etherscan.io/tx/' };
+let CHAIN_LABEL = 'Ethereum', EXPLORER = { name: 'Etherscan', tx: 'https://etherscan.io/tx/' }, PAIR_META = {}, HIST_DAYS = 30;
+/* Writes exist but none could be priced: show that plainly instead of a $0 that reads as free. */
+const unpriced = (x) => Boolean(x) && x.updates > 0 && x.costCounted === 0;
 const SECS = { '24h':86400, '7d':604800, '30d':2592000 };
 /* A value nobody has rewritten for this long is not a live quote. It is dimmed, marked stale and
    left out of the median instead of being compared with prices from today. */
@@ -240,6 +242,7 @@ async function loadPairs(){
   const c = (p.chains||[]).find(x => x.id === chain);
   if (c){ CHAIN_LABEL = c.label; EXPLORER = c.explorer; $('#chainName').textContent = c.label; }
   $('#chain').innerHTML = (p.chains||[]).map(x => `<option value="${x.id}" ${x.id===chain?'selected':''}>${x.label}</option>`).join('');
+  PAIR_META = Object.fromEntries(p.pairs.map(x => [x.id, x]));
   if (!p.pairs.some(x => x.id === pair)) pair = p.pairs[0].id;
   $('#pair').innerHTML = p.pairs.map(x => `<option value="${x.id}" ${x.id===pair?'selected':''}>${x.label}</option>`).join('');
 }
@@ -256,6 +259,7 @@ async function refresh(){
   if (k !== chain || p !== pair || w !== win) return; /* a newer request owns the screen */
   if (!u || u.error || !u.updates || !s || !s.stats){ $('#status').innerHTML = `<span class="warn">${(u && u.error) || (s && s.error) || 'no data'}</span>`; return; }
   data = u; stats = s;
+  HIST_DAYS = h.historyDays || HIST_DAYS;
   const hc = (h.chains||{})[k] || {}, bf = hc.backfill || {};
   $('#status').innerHTML = bf.status === 'running' ? `<span class="warn">backfilling ${h.historyDays} days of ${CHAIN_LABEL} via ${hc.source}…</span>`
     : `updated ${new Date().toISOString().slice(11,19)} UTC · ${CHAIN_LABEL} block ${hc.lastBlock} · ETH $${(hc.ethUsd||0).toFixed(0)}`;
@@ -386,16 +390,17 @@ function renderLegend(){
 function renderStats(){
   const s = stats.stats[win], tracked = trackedSet();
   $('#stats').innerHTML = ORDER.map(o => { const x = s[o];
-    if (!tracked.has(o)) return `<div class="panel card" style="opacity:.55"><h3><i style="background:${COLORS[o]}"></i>${NAMES[o]}</h3><div class="row"><span>Not tracked for this pair<small>no ${NAMES[o]} contract verified on ${CHAIN_LABEL} for it; this says nothing about whether one exists</small></span><span>n/a</span></div></div>`;
+    if (!tracked.has(o)) return `<div class="panel card" style="opacity:.55"><h3><i style="background:${COLORS[o]}"></i>${NAMES[o]}</h3><div class="row"><span>Not tracked for this pair<small>${((PAIR_META[pair]||{}).notes||{})[o] || `no ${NAMES[o]} contract verified on ${CHAIN_LABEL} for it; this says nothing about whether one exists`}</small></span><span>n/a</span></div></div>`;
     return `<div class="panel card"><h3><i style="background:${COLORS[o]}"></i>${NAMES[o]}</h3>
+      ${x.notPushed ? `<div class="row"><span style="color:#f59e0b">Pyth is not publishing ${(PAIR_META[pair]||{}).label||pair} in push mode on ${CHAIN_LABEL}<small>no push in the last ${HIST_DAYS} days; the latest price below is the one stored in the Pyth contract</small></span></div>` : ''}
       <div class="row"><span>Updates (${win})</span><span>${x.updates}</span></div>
       <div class="row"><span>Max deviation<small>between consecutive updates</small></span><span>${x.maxDeviationPct.toFixed(4)}%</span></div>
-      <div class="row"><span>Total gas (${win})<small>${rule[o]||''}${x.costCounted < x.updates ? ` · ${x.costCounted} of ${x.updates} writes priced` : ''}</small></span><span>${fmtU(x.costTotalUsd)}</span></div>
-      <div class="row"><span>Avg per update</span><span>${fmtU(x.costAvgUsd)}</span></div>
-      <div class="row"><span>Most expensive</span><span>${fmtU(x.costMaxUsd)}</span></div>
+      <div class="row"><span>Total gas (${win})<small>${rule[o]||''}${x.costCounted < x.updates ? ` · ${x.costCounted} of ${x.updates} writes priced` : ''}</small></span><span>${unpriced(x) ? 'not priced' : fmtU(x.costTotalUsd)}</span></div>
+      <div class="row"><span>Avg per update</span><span>${unpriced(x) ? 'not priced' : fmtU(x.costAvgUsd)}</span></div>
+      <div class="row"><span>Most expensive</span><span>${unpriced(x) ? 'not priced' : fmtU(x.costMaxUsd)}</span></div>
       <div class="row"><span>Latest on-chain<small>${x.lastAt?ts(x.lastAt):''}${x.fromContract?' · stored price, no write in history':''}</small></span><span>${x.lastValue!=null?fmtP(x.lastValue):'n/a'} <span style="color:#8a93a0">· ${age(x.ageSeconds)} old</span></span></div>
     </div>`; }).join('');
-  $('#foot').innerHTML = `Every point is one on-chain write, read from the oracle contracts' own events on ${CHAIN_LABEL}. Nothing sampled, nothing estimated. Gas is priced in USD at the Chainlink ETH/USD rate at the time each update was recorded (now $${(stats.ethUsd||0).toFixed(0)}). RedStone and Pyth can write several feeds in one transaction, so their gas is split evenly across the feeds in that transaction; Chainlink and Chronicle write one feed per transaction. Pyth is a pull oracle: its price reaches Ethereum only when someone pushes it, so a gap means nobody did, and when no Pyth write is in the history its card shows the price stored in the Pyth contract and how old it is. Pyth moved to upgraded core contracts on 26 August 2026: the legacy core is read up to that date and the upgraded core after it. Many Pyth pushes happen inside another app's transaction, whose gas also pays for the app's own work, so only pushes sent straight to a Pyth contract are priced. A value nobody has rewritten for more than 36 hours is dimmed in the tooltip, marked stale and left out of the median, because comparing a weeks-old write against today's prices says nothing about either. Chronicle points marked <span style="color:#f59e0b">optimistic</span> are OpPoked writes that finalise later. Max deviation is the largest move between two consecutive updates of the same oracle. In the <b>vs median</b> view each write is shown as its distance from the median of the oracles' latest values at that moment${(stats.oracles||[]).length===2?'; with two oracles that median is simply their midpoint, so the two sit at half the gap from each other, and a swing is not one of them being wrong':''}. Double-click a point to open its transaction on ${EXPLORER.name}. Independent, not affiliated with any oracle.`;
+  $('#foot').innerHTML = `Every point is one on-chain write, read from the oracle contracts' own events on ${CHAIN_LABEL}. Nothing sampled, nothing estimated. Gas is priced in USD at the Chainlink ETH/USD rate at the time each update was recorded (now $${(stats.ethUsd||0).toFixed(0)}). RedStone and Pyth can write several feeds in one transaction, so their gas is split evenly across the feeds in that transaction; Chainlink and Chronicle write one feed per transaction. Pyth is a pull oracle: its price reaches Ethereum only when someone pushes it, so a gap means nobody did, and when no Pyth write is in the history its card shows the price stored in the Pyth contract and how old it is. Pyth moved to upgraded core contracts on 26 August 2026: the legacy core is read up to that date and the upgraded core after it. Many Pyth pushes happen inside another app's transaction, whose gas also pays for the app's own work, so only pushes sent straight to a Pyth contract are priced; an oracle whose writes could not be priced shows "not priced", not $0. Pyth's off-chain pull prices are not shown: since that upgrade Pyth's price service requires an API key, and everything on this page is read on-chain. A value nobody has rewritten for more than 36 hours is dimmed in the tooltip, marked stale and left out of the median, because comparing a weeks-old write against today's prices says nothing about either. Chronicle points marked <span style="color:#f59e0b">optimistic</span> are OpPoked writes that finalise later. Max deviation is the largest move between two consecutive updates of the same oracle. In the <b>vs median</b> view each write is shown as its distance from the median of the oracles' latest values at that moment${(stats.oracles||[]).length===2?'; with two oracles that median is simply their midpoint, so the two sit at half the gap from each other, and a swing is not one of them being wrong':''}. Double-click a point to open its transaction on ${EXPLORER.name}. Independent, not affiliated with any oracle.`;
 }
 
 /* ---------- update cadence (stacked area) ---------- */
@@ -498,7 +503,7 @@ function drawDonut(){
     g.appendChild(c);
   });
   svg.appendChild(g);
-  $('#donKeys').innerHTML = items.map((x,i) => `<div class="k" data-o="${x.o}"><span class="ring" style="${ring(x.color,12)}"></span><span>${x.name}</span><span class="v">${fmtUsd(x.v)}</span><span class="p">${donPct[i]}%</span></div>`).join('');
+  $('#donKeys').innerHTML = items.map((x,i) => { const st = s[x.o], none = unpriced(st), part = st && st.costCounted > 0 && st.costCounted < st.updates; return `<div class="k" data-o="${x.o}"><span class="ring" style="${ring(x.color,12)}"></span><span>${x.name}${none ? ' <small style="color:var(--dim)">not priced</small>' : part ? ` <small style="color:var(--dim)">${st.costCounted} of ${st.updates} priced</small>` : ''}</span><span class="v">${none ? 'n/a' : fmtUsd(x.v)}</span><span class="p">${none ? '' : donPct[i] + '%'}</span></div>`; }).join('');
   $('#donKeys').querySelectorAll('.k').forEach(n => {
     n.addEventListener('mouseenter', () => setDonHover(n.dataset.o));
     n.addEventListener('mouseleave', () => setDonHover(null));
@@ -554,7 +559,7 @@ function drawRadar(){
     svg.appendChild(g);
   }
   metrics.forEach((m,i) => { const p = pt(i,1.2), c = Math.cos(ang(i)); label(lyr, p.x, p.y, m.label, Math.abs(c) < .2 ? 'middle' : c > 0 ? 'start' : 'end'); });
-  radNotes = Object.fromEntries(vis.map(o => [o, metrics.map(m => `${m.label} ${m.fmt(m.get(s[o]))}`).join(' · ')]));
+  radNotes = Object.fromEntries(vis.map(o => [o, metrics.map(m => `${m.label} ${/^gas/.test(m.label) && unpriced(s[o]) ? 'not priced' : m.fmt(m.get(s[o]))}`).join(' · ')]));
   $('#radKeys').innerHTML = vis.map(o => `<div class="k" data-o="${o}"><span class="ring" style="${ring(COLORS[o],12)}"></span><span>${NAMES[o]}</span><span class="note"></span></div>`).join('');
   $('#radKeys').querySelectorAll('.k').forEach(nd => {
     nd.addEventListener('mouseenter', () => setRadHover(nd.dataset.o));

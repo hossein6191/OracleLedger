@@ -18,8 +18,8 @@ Double-click a point to open its transaction on Etherscan.
 | --- | --- | --- | --- | --- | --- |
 | Ethereum | ETH / USD | yes | yes | yes | yes |
 | Ethereum | BTC / USD | yes | yes | yes | yes |
-| Ethereum | USDC / USD | yes | not tracked | yes | yes |
-| Ethereum | USDT / USD | yes | not tracked | yes | yes |
+| Ethereum | USDC / USD | yes | yes | yes | yes |
+| Ethereum | USDT / USD | yes | yes | yes | not pushed |
 | Base | ETH / USD | yes | yes | yes | yes |
 | Base | BTC / USD | yes | not tracked | yes | yes |
 
@@ -36,14 +36,16 @@ Pyth moved to upgraded core contracts on 26 August 2026. On each chain the site 
 both, the legacy core up to that date and the upgraded core after it, so a month of
 history stays whole and a feed still pushed to both contracts is not counted twice.
 
-On Ethereum, Pyth pushes ETH / USD, BTC / USD and USDC / USD. It does not push
-USDT / USD, so that card shows the price stored in the Pyth contract
-(`getPriceUnsafe`) and how old it is. Any value with no write for more than 36 hours
+On Ethereum, Pyth pushes ETH / USD, BTC / USD and USDC / USD. It is not publishing
+USDT / USD in push mode on Ethereum mainnet; the page says so, and that card shows the
+price stored in the Pyth contract (`getPriceUnsafe`) and how old it is. Pyth's
+off-chain pull prices are not used: since the upgrade its price service requires an
+API key, and everything here is read on-chain. Any value with no write for more than 36 hours
 is marked stale in the tooltip and left out of the median.
 
 Many Pyth pushes happen inside another app's transaction, whose gas also pays for the
-app's own work. Only pushes sent straight to a Pyth contract are priced, and the card
-says how many were.
+app's own work. Only pushes sent straight to a Pyth contract are priced, the card says
+how many were, and an oracle with no priced write shows "not priced" rather than $0.
 
 ## Two views
 

@@ -161,7 +161,7 @@ createServer((req, res) => {
   if (url.pathname === '/api/pairs') {
     return json(res, {
       chain, chains: chainList(), oracles: ORACLES, costRule: COST_RULE,
-      pairs: Object.entries(pairsOf(chain)).map(([id, c]) => ({ id, label: c.label, oracles: oraclesFor(chain, id) })),
+      pairs: Object.entries(pairsOf(chain)).map(([id, c]) => ({ id, label: c.label, oracles: oraclesFor(chain, id), notes: c.notes || {} })),
     });
   }
   if ((url.pathname === '/api/updates' || url.pathname === '/api/stats') && !pairsOf(chain)[pair]) return json(res, { error: 'unknown pair' }, 404);
@@ -183,6 +183,8 @@ createServer((req, res) => {
     const out = {}; for (const [w, secs] of Object.entries(WINDOWS)) { out[w] = {}; for (const o of ORACLES) out[w][o] = statsFor(st.pairs[pair][o], secs); }
     const pl = st.pythLatest[pair], nowS = Math.floor(Date.now() / 1000);
     if (pl) for (const w of Object.keys(out)) if (out[w].pyth.lastValue == null) Object.assign(out[w].pyth, { lastValue: pl.value, lastAt: pl.t, ageSeconds: nowS - pl.t, fromContract: true });
+    // No Pyth push in the whole history: Pyth is not publishing this feed in push mode on this chain.
+    if (oraclesFor(chain, pair).includes('pyth') && !st.pairs[pair].pyth.length) for (const w of Object.keys(out)) out[w].pyth.notPushed = true;
     return json(res, { chain, pair, oracles: oraclesFor(chain, pair), ethUsd: st.ethUsd, costRule: COST_RULE, stats: out });
   }
   if (url.pathname === '/' || url.pathname === '/index.html') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); return res.end(readFileSync(INDEX)); }
